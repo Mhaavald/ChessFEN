@@ -1,0 +1,25 @@
+# Python
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+
+# Virtual environments
+.venv/
+.venv-*/
+env/
+ENV/
+
+# Data & models (don’t commit these)
+data/
+models/
+*.pt
+*.onnx
+
+# Jupyter
+.ipynb_checkpoints/
+
+# OS / editor noise
+.vscode/
+.DS_Store
+Thumbs.db
