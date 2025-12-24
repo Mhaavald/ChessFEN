@@ -1,0 +1,920 @@
+﻿@page "/"
+@using System.Text.Json
+@inject HttpClient Http
+@inject IConfiguration Configuration
+@inject ILogger<Home> Logger
+@inject IJSRuntime JSRuntime
+@rendermode InteractiveServer
+
+<PageTitle>Chess FEN Scanner</PageTitle>
+
+<div class="container">
+    <h1 class="text-center mb-4">♔ Chess FEN Scanner</h1>
+    
+    <div class="row">
+        <!-- Left: Image Upload/Capture -->
+        <div class="col-md-6">
+            <div class="card">
+                <div class="card-header">
+                    <h5>📷 Capture or Upload Image</h5>
+                </div>
+                <div class="card-body">
+                    <!-- File Upload -->
+                    <div class="mb-3">
+                        <label class="form-label">Upload chess board image:</label>
+                        <InputFile OnChange="HandleFileSelected" class="form-control" accept="image/*" />
+                    </div>
+                    
+                    <!-- Camera Capture (mobile) -->
+                    <div class="mb-3">
+                        <label class="form-label">Or capture from camera:</label>
+                        <InputFile OnChange="HandleFileSelected" class="form-control" accept="image/*" capture="environment" />
+                    </div>
+                    
+                    <!-- Preview -->
+                    @if (hasImage)
+                    {
+                        <div class="text-center mb-3">
+                            @if (!string.IsNullOrEmpty(imagePreview) && imagePreview != "pending")
+                            {
+                                <img src="@imagePreview" alt="Preview" class="img-fluid" style="max-height: 300px;" />
+                            }
+                            else
+                            {
+                                <div class="alert alert-info">
+                                    📁 File selected: @(selectedFile?.Name ?? "Unknown") (@(selectedFile?.Size / 1024) KB)
+                                    <br/><small>Click "Analyze Board" to process</small>
+                                </div>
+                            }
+                        </div>
+                    }
+                    
+                    <!-- Model Selection (Debug) -->
+                    @if (debugMode)
+                    {
+                        <div class="mb-3">
+                            <label class="form-label">Model:</label>
+                            <select class="form-select" @bind="selectedModel">
+                                @foreach (var model in availableModels)
+                                {
+                                    <option value="@model.Name">@model.Name (@model.Type) - @model.Accuracy</option>
+                                }
+                            </select>
+                        </div>
+                    }
+                    
+                    <!-- Predict Button -->
+                    <button type="button" class="btn btn-primary btn-lg w-100" @onclick="OnAnalyzeClick" disabled="@buttonDisabled">
+                        @if (isLoading)
+                        {
+                            <span class="spinner-border spinner-border-sm me-2"></span>
+                        }
+                        🔍 Analyze Board
+                    </button>
+                    
+                    <!-- Test Button -->
+                    <button type="button" class="btn btn-warning mt-2 w-100" @onclick="TestClick">
+                        🧪 Test Click (Counter: @testCounter)
+                    </button>
+                    
+                    <!-- Button state debug -->
+                    <div class="small text-muted mt-1">
+                        Button disabled: @buttonDisabled | File selected: @hasImage | Loading: @isLoading
+                    </div>
+                    
+                    <!-- Debug Toggle -->
+                    <div class="form-check mt-3">
+                        <input type="checkbox" class="form-check-input" id="debugMode" @bind="debugMode" @bind:after="LoadModels" />
+                        <label class="form-check-label" for="debugMode">Debug Mode</label>
+                    </div>
+                    
+                    <!-- Debug Log Panel -->
+                    @if (debugLogs.Count > 0)
+                    {
+                        <div class="mt-3">
+                            <label class="form-label fw-bold">Debug Log:</label>
+                            <div class="debug-log bg-dark text-light p-2" style="max-height: 200px; overflow-y: auto; font-family: monospace; font-size: 12px;">
+                                @foreach (var log in debugLogs)
+                                {
+                                    <div>@log</div>
+                                }
+                            </div>
+                            <button class="btn btn-sm btn-outline-secondary mt-1" @onclick="() => debugLogs.Clear()">Clear Log</button>
+                        </div>
+                    }
+                </div>
+            </div>
+        </div>
+        
+        <!-- Right: Results -->
+        <div class="col-md-6">
+            <div class="card">
+                <div class="card-header d-flex justify-content-between align-items-center">
+                    <h5>📋 Result</h5>
+                    @if (!string.IsNullOrEmpty(resultFen))
+                    {
+                        <button class="btn btn-sm btn-outline-secondary" @onclick="CopyFen">
+                            📋 Copy FEN
+                        </button>
+                    }
+                </div>
+                <div class="card-body">
+                    @if (!string.IsNullOrEmpty(errorMessage))
+                    {
+                        <div class="alert alert-danger">@errorMessage</div>
+                    }
+                    
+                    @if (!string.IsNullOrEmpty(resultFen))
+                    {
+                        <!-- FEN String -->
+                        <div class="mb-3">
+                            <label class="form-label fw-bold">FEN (piece placement):</label>
+                            <input type="text" class="form-control font-monospace" value="@resultFen" readonly />
+                        </div>
+                        
+                        <!-- Full FEN for chess apps -->
+                        <div class="mb-3">
+                            <label class="form-label fw-bold">Full FEN (for chess apps):</label>
+                            <div class="input-group mb-2">
+                                <span class="input-group-text">White to move</span>
+                                <input type="text" class="form-control font-monospace" value="@GetFullFen("w")" readonly id="fenWhite" />
+                                <button class="btn btn-outline-primary" type="button" onclick="copyFenFromInput('fenWhite', this)">
+                                    📋 Copy
+                                </button>
+                            </div>
+                            <div class="input-group">
+                                <span class="input-group-text">Black to move</span>
+                                <input type="text" class="form-control font-monospace" value="@GetFullFen("b")" readonly id="fenBlack" />
+                                <button class="btn btn-outline-primary" type="button" onclick="copyFenFromInput('fenBlack', this)">
+                                    📋 Copy
+                                </button>
+                            </div>
+                        </div>
+                        
+                        <!-- FEN Validation -->
+                        @if (fenValidation != null)
+                        {
+                            <div class="alert @(fenValidation.IsValid ? "alert-success" : "alert-warning") py-2">
+                                @if (fenValidation.IsValid)
+                                {
+                                    <span>✅ Valid chess position</span>
+                                }
+                                else
+                                {
+                                    <span>⚠️ Position issues:</span>
+                                    <ul class="mb-0 small">
+                                        @foreach (var issue in fenValidation.Issues)
+                                        {
+                                            <li>@issue</li>
+                                        }
+                                    </ul>
+                                }
+                            </div>
+                        }
+                        
+                        <!-- Chess Board Display -->
+                        <div class="chess-board-container mb-3">
+                            <table class="chess-board mx-auto">
+                                @for (int row = 0; row < 8; row++)
+                                {
+                                    var r = row;
+                                    <tr>
+                                        <td class="rank-label">@(8 - row)</td>
+                                        @for (int col = 0; col < 8; col++)
+                                        {
+                                            var c = col;
+                                            var isLight = (row + col) % 2 == 0;
+                                            var square = $"{(char)('a' + col)}{8 - row}";
+                                            var piece = boardPieces[row, col];
+                                            var isEditing = editingSquare == square;
+                                            
+                                            <td class="@(isLight ? "light" : "dark") @(isEditing ? "editing" : "")" 
+                                                @onclick="() => StartEditing(square, row, col)">
+                                                @if (isEditing)
+                                                {
+                                                    <select class="piece-select" @onchange="e => UpdatePiece(square, row, col, e.Value?.ToString())">
+                                                        @foreach (var p in pieceOptions)
+                                                        {
+                                                            <option value="@p.Key" selected="@(p.Key == piece)">@p.Value</option>
+                                                        }
+                                                    </select>
+                                                }
+                                                else
+                                                {
+                                                    <span class="piece">@GetPieceUnicode(piece)</span>
+                                                }
+                                            </td>
+                                        }
+                                    </tr>
+                                }
+                                <tr>
+                                    <td></td>
+                                    @for (char c = 'a'; c <= 'h'; c++)
+                                    {
+                                        <td class="file-label">@c</td>
+                                    }
+                                </tr>
+                            </table>
+                        </div>
+                        
+                        <!-- Correction Actions -->
+                        @if (hasCorrections)
+                        {
+                            <div class="alert alert-info">
+                                <strong>Corrections made:</strong> @string.Join(", ", corrections.Select(c => $"{c.Key}→{c.Value}"))
+                            </div>
+                            <button class="btn btn-success w-100" @onclick="SubmitCorrections">
+                                ✅ Submit Corrections for Training
+                            </button>
+                        }
+                    }
+                </div>
+            </div>
+            
+            <!-- Debug Images -->
+            @if (debugMode && debugImages != null)
+            {
+                <div class="card mt-3">
+                    <div class="card-header">
+                        <h5>🔧 Debug Images</h5>
+                    </div>
+                    <div class="card-body">
+                        <div class="row">
+                            @if (!string.IsNullOrEmpty(debugImages.Detection))
+                            {
+                                <div class="col-4">
+                                    <label>Detection</label>
+                                    <img src="data:image/png;base64,@debugImages.Detection" class="img-fluid" />
+                                </div>
+                            }
+                            @if (!string.IsNullOrEmpty(debugImages.Warped))
+                            {
+                                <div class="col-4">
+                                    <label>Warped</label>
+                                    <img src="data:image/png;base64,@debugImages.Warped" class="img-fluid" />
+                                </div>
+                            }
+                            @if (!string.IsNullOrEmpty(debugImages.Overlay))
+                            {
+                                <div class="col-4">
+                                    <label>Overlay</label>
+                                    <img src="data:image/png;base64,@debugImages.Overlay" class="img-fluid" />
+                                </div>
+                            }
+                        </div>
+                    </div>
+                </div>
+            }
+        </div>
+    </div>
+</div>
+
+<style>
+    .chess-board {
+        border-collapse: collapse;
+        border: 2px solid #333;
+    }
+    .chess-board td {
+        width: 45px;
+        height: 45px;
+        text-align: center;
+        vertical-align: middle;
+        cursor: pointer;
+    }
+    .chess-board td.light { background-color: #f0d9b5; }
+    .chess-board td.dark { background-color: #b58863; }
+    .chess-board td.editing { background-color: #7fb3d5 !important; }
+    .chess-board td:hover:not(.rank-label):not(.file-label) { 
+        outline: 2px solid #007bff; 
+    }
+    .piece { font-size: 32px; }
+    .piece-select { 
+        width: 100%; 
+        font-size: 20px; 
+        text-align: center;
+    }
+    .rank-label, .file-label {
+        font-weight: bold;
+        background: transparent !important;
+        cursor: default;
+    }
+</style>
+
+<script>
+    // Direct copy function for iOS - must be called from onclick directly (not Blazor)
+    function copyFenFromInput(inputId, button) {
+        const input = document.getElementById(inputId);
+        if (!input) return;
+        
+        const text = input.value;
+        const originalText = button.innerHTML;
+        
+        // iOS Safari: select and copy from input
+        input.focus();
+        input.setSelectionRange(0, text.length);
+        
+        let copied = false;
+        
+        // Try execCommand first (works in user gesture context)
+        try {
+            copied = document.execCommand('copy');
+        } catch (e) {
+            copied = false;
+        }
+        
+        // Try modern clipboard API
+        if (!copied && navigator.clipboard) {
+            navigator.clipboard.writeText(text).then(function() {
+                button.innerHTML = '✓ Copied!';
+                setTimeout(function() { button.innerHTML = originalText; }, 2000);
+            }).catch(function() {
+                button.innerHTML = '⚠ Select & Copy';
+                setTimeout(function() { button.innerHTML = originalText; }, 2000);
+            });
+            return;
+        }
+        
+        if (copied) {
+            button.innerHTML = '✓ Copied!';
+        } else {
+            button.innerHTML = '⚠ Select & Copy';
+        }
+        
+        setTimeout(function() { button.innerHTML = originalText; }, 2000);
+    }
+
+    window.copyToClipboardFallback = async function(text) {
+        // Try modern clipboard API first
+        if (navigator.clipboard && window.isSecureContext) {
+            try {
+                await navigator.clipboard.writeText(text);
+                return { success: true };
+            } catch (e) {
+                // Fall through to fallback
+            }
+        }
+        
+        // Fallback: Create temporary textarea
+        const textArea = document.createElement("textarea");
+        textArea.value = text;
+        textArea.style.position = "fixed";
+        textArea.style.left = "-999999px";
+        textArea.style.top = "-999999px";
+        document.body.appendChild(textArea);
+        textArea.focus();
+        textArea.select();
+        
+        try {
+            const successful = document.execCommand('copy');
+            textArea.remove();
+            if (successful) {
+                return { success: true };
+            }
+        } catch (e) {
+            textArea.remove();
+        }
+        
+        // Last resort: prompt user
+        return { success: false, text: text };
+    };
+</script>
+
+@code {
+    private string? imageBase64;
+    private string? imagePreview;
+    private string? resultFen;
+    private string? originalFen;
+    private string? errorMessage;
+    private bool isLoading = false;
+    private bool debugMode = false;
+    private string selectedModel = "";
+    
+    private string[,] boardPieces = new string[8, 8];
+    private string? editingSquare;
+    private Dictionary<string, string> corrections = new();
+    private bool hasCorrections => corrections.Count > 0;
+    private FenValidationResult? fenValidation;
+    
+    private DebugImagesModel? debugImages;
+    private List<ModelInfo> availableModels = new();
+    private List<string> debugLogs = new();
+    
+    private bool buttonDisabled => isLoading || !hasImage;
+    
+    private int testCounter = 0;
+    
+    private Dictionary<string, string> pieceOptions = new()
+    {
+        { "empty", " " },
+        { "wP", "♙" }, { "wN", "♘" }, { "wB", "♗" }, { "wR", "♖" }, { "wQ", "♕" }, { "wK", "♔" },
+        { "bP", "♟" }, { "bN", "♞" }, { "bB", "♝" }, { "bR", "♜" }, { "bQ", "♛" }, { "bK", "♚" }
+    };
+    
+    private void Log(string message)
+    {
+        var timestamp = DateTime.Now.ToString("HH:mm:ss.fff");
+        var logMessage = $"[{timestamp}] {message}";
+        debugLogs.Add(logMessage);
+        Logger.LogInformation(logMessage);
+        Console.WriteLine(logMessage);
+    }
+    
+    private async Task OnAnalyzeClick()
+    {
+        Log(">>> OnAnalyzeClick triggered! <<<");
+        await PredictFen();
+    }
+    
+    private void TestClick()
+    {
+        testCounter++;
+        Log($">>> TestClick! Counter: {testCounter} <<<");
+    }
+
+    protected override async Task OnInitializedAsync()
+    {
+        Log("OnInitializedAsync called");
+        Log($"HttpClient BaseAddress: {Http.BaseAddress}");
+        InitializeBoard();
+    }
+
+    private void InitializeBoard()
+    {
+        for (int r = 0; r < 8; r++)
+            for (int c = 0; c < 8; c++)
+                boardPieces[r, c] = "empty";
+    }
+
+    private async Task LoadModels()
+    {
+        if (!debugMode) return;
+        
+        Log("LoadModels called");
+        try
+        {
+            var url = "/api/chess/models";
+            Log($"GET {url}");
+            var response = await Http.GetAsync(url);
+            Log($"Response: {response.StatusCode}");
+            if (response.IsSuccessStatusCode)
+            {
+                var json = await response.Content.ReadAsStringAsync();
+                Log($"Models JSON: {json.Substring(0, Math.Min(200, json.Length))}...");
+                availableModels = JsonSerializer.Deserialize<List<ModelInfo>>(json, 
+                    new JsonSerializerOptions { PropertyNameCaseInsensitive = true }) ?? new();
+                
+                var best = availableModels.FirstOrDefault(m => m.IsBest);
+                if (best != null) selectedModel = best.Name;
+                Log($"Loaded {availableModels.Count} models, selected: {selectedModel}");
+            }
+            else
+            {
+                Log($"Failed to load models: {response.StatusCode}");
+            }
+        }
+        catch (Exception ex)
+        {
+            Log($"LoadModels error: {ex.Message}");
+        }
+    }
+
+    private async Task HandleFileSelected(InputFileChangeEventArgs e)
+    {
+        Log("HandleFileSelected called");
+        var file = e.File;
+        if (file == null)
+        {
+            Log("No file selected");
+            return;
+        }
+
+        Log($"File: {file.Name}, Size: {file.Size} bytes, Type: {file.ContentType}");
+        
+        // Store file reference for later, don't read into memory yet
+        selectedFile = file;
+        imagePreview = "pending"; // Signal that we have a file but haven't loaded preview
+        hasImage = true;
+        Log($"File selected, ready for analysis");
+        
+        // Clear previous results
+        resultFen = null;
+        errorMessage = null;
+        fenValidation = null;
+        corrections.Clear();
+        InitializeBoard();
+    }
+    
+    private IBrowserFile? selectedFile;
+    private bool hasImage = false;
+
+    private async Task PredictFen()
+    {
+        Log("=== PredictFen STARTED ===");
+        
+        if (selectedFile == null)
+        {
+            Log("ERROR: No file selected");
+            return;
+        }
+        
+        isLoading = true;
+        errorMessage = null;
+        StateHasChanged();
+        
+        try
+        {
+            // Read file now (only when needed for API call)
+            Log($"Reading file: {selectedFile.Name}, Size: {selectedFile.Size}");
+            
+            // Read all bytes properly using MemoryStream
+            using var memoryStream = new MemoryStream();
+            await selectedFile.OpenReadStream(maxAllowedSize: 10 * 1024 * 1024).CopyToAsync(memoryStream);
+            var buffer = memoryStream.ToArray();
+            Log($"Bytes read: {buffer.Length}");
+            
+            var base64Data = Convert.ToBase64String(buffer);
+            Log($"File read, base64 length: {base64Data.Length}");
+            
+            var query = debugMode ? $"?debug=true&model={selectedModel}" : "";
+            var url = $"/api/chess/predict/base64{query}";
+            Log($"POST {url}");
+            Log($"HttpClient.BaseAddress = {Http.BaseAddress}");
+            
+            var payload = JsonSerializer.Serialize(new { image = base64Data });
+            Log($"Payload size: {payload.Length} chars");
+            
+            var content = new StringContent(payload, System.Text.Encoding.UTF8, "application/json");
+            
+            Log("Sending HTTP request...");
+            var response = await Http.PostAsync(url, content);
+            Log($"Response received: {response.StatusCode}");
+            
+            var json = await response.Content.ReadAsStringAsync();
+            Log($"Response body length: {json.Length}");
+            Log($"Response body (first 500 chars): {json.Substring(0, Math.Min(500, json.Length))}");
+            
+            var result = JsonSerializer.Deserialize<PredictionResult>(json, 
+                new JsonSerializerOptions { PropertyNameCaseInsensitive = true });
+            
+            if (result?.Success == true)
+            {
+                Log($"SUCCESS! FEN: {result.Fen}");
+                resultFen = result.Fen;
+                originalFen = result.Fen;
+                fenValidation = ValidateFen(resultFen ?? "");
+                Log($"Validation: {(fenValidation.IsValid ? "Valid" : "Invalid")} - {fenValidation.Issues.Count} issues");
+                ParseBoardFromResult(result.Board);
+                debugImages = result.DebugImages;
+                
+                // Store for preview after success
+                imageBase64 = base64Data;
+                imagePreview = $"data:{selectedFile.ContentType};base64,{base64Data}";
+            }
+            else
+            {
+                Log($"FAILED: {result?.Error ?? "Unknown error"}");
+                errorMessage = result?.Error ?? "Unknown error";
+            }
+        }
+        catch (Exception ex)
+        {
+            Log($"EXCEPTION: {ex.GetType().Name}: {ex.Message}");
+            Log($"Stack: {ex.StackTrace?.Substring(0, Math.Min(300, ex.StackTrace?.Length ?? 0))}");
+            errorMessage = $"Error: {ex.Message}";
+        }
+        finally
+        {
+            isLoading = false;
+            Log("=== PredictFen COMPLETED ===");
+            StateHasChanged();
+        }
+    }
+
+    private void ParseBoardFromResult(string[][]? board)
+    {
+        if (board == null) return;
+        
+        for (int r = 0; r < 8 && r < board.Length; r++)
+        {
+            for (int c = 0; c < 8 && c < board[r].Length; c++)
+            {
+                boardPieces[r, c] = board[r][c] ?? "empty";
+            }
+        }
+    }
+
+    private string GetPieceUnicode(string piece)
+    {
+        return pieceOptions.TryGetValue(piece, out var unicode) ? unicode : " ";
+    }
+
+    private void StartEditing(string square, int row, int col)
+    {
+        editingSquare = editingSquare == square ? null : square;
+    }
+
+    private void UpdatePiece(string square, int row, int col, string? newPiece)
+    {
+        if (string.IsNullOrEmpty(newPiece)) return;
+        
+        var oldPiece = boardPieces[row, col];
+        if (oldPiece != newPiece)
+        {
+            boardPieces[row, col] = newPiece;
+            corrections[square] = newPiece;
+            resultFen = GenerateFenFromBoard();
+            fenValidation = ValidateFen(resultFen ?? "");
+        }
+        editingSquare = null;
+    }
+
+    private string GenerateFenFromBoard()
+    {
+        var rows = new List<string>();
+        for (int r = 0; r < 8; r++)
+        {
+            var row = "";
+            int empty = 0;
+            for (int c = 0; c < 8; c++)
+            {
+                var piece = boardPieces[r, c];
+                if (piece == "empty")
+                {
+                    empty++;
+                }
+                else
+                {
+                    if (empty > 0) { row += empty; empty = 0; }
+                    row += PieceToFenChar(piece);
+                }
+            }
+            if (empty > 0) row += empty;
+            rows.Add(row);
+        }
+        return string.Join("/", rows);
+    }
+
+    private string PieceToFenChar(string piece) => piece switch
+    {
+        "wP" => "P", "wN" => "N", "wB" => "B", "wR" => "R", "wQ" => "Q", "wK" => "K",
+        "bP" => "p", "bN" => "n", "bB" => "b", "bR" => "r", "bQ" => "q", "bK" => "k",
+        _ => ""
+    };
+
+    private async Task SubmitCorrections()
+    {
+        try
+        {
+            var payload = JsonSerializer.Serialize(new
+            {
+                originalFen = originalFen,
+                correctedFen = resultFen,
+                image = imageBase64,
+                correctedSquares = corrections
+            });
+            var content = new StringContent(payload, System.Text.Encoding.UTF8, "application/json");
+            
+            var response = await Http.PostAsync("/api/chess/feedback", content);
+            
+            if (response.IsSuccessStatusCode)
+            {
+                corrections.Clear();
+                StateHasChanged();
+            }
+        }
+        catch { /* ignore */ }
+    }
+
+    private async Task CopyFen()
+    {
+        await CopyToClipboard(resultFen ?? "");
+    }
+
+    private async Task CopyWhiteFen()
+    {
+        await CopyToClipboard(GetFullFen("w"));
+    }
+
+    private async Task CopyBlackFen()
+    {
+        await CopyToClipboard(GetFullFen("b"));
+    }
+
+    private string GetFullFen(string sideToMove)
+    {
+        if (string.IsNullOrEmpty(resultFen)) return "";
+        
+        // Build full FEN: pieces side castling enpassant halfmove fullmove
+        // We can try to infer castling rights from piece positions
+        var castling = InferCastlingRights();
+        
+        // Format: [pieces] [side] [castling] [enpassant] [halfmove] [fullmove]
+        return $"{resultFen} {sideToMove} {castling} - 0 1";
+    }
+
+    private string InferCastlingRights()
+    {
+        // Check if kings and rooks are on starting squares
+        var rights = "";
+        
+        // White: King on e1 (row 7, col 4)
+        if (boardPieces[7, 4] == "wK")
+        {
+            // White kingside: Rook on h1 (row 7, col 7)
+            if (boardPieces[7, 7] == "wR") rights += "K";
+            // White queenside: Rook on a1 (row 7, col 0)
+            if (boardPieces[7, 0] == "wR") rights += "Q";
+        }
+        
+        // Black: King on e8 (row 0, col 4)
+        if (boardPieces[0, 4] == "bK")
+        {
+            // Black kingside: Rook on h8 (row 0, col 7)
+            if (boardPieces[0, 7] == "bR") rights += "k";
+            // Black queenside: Rook on a8 (row 0, col 0)
+            if (boardPieces[0, 0] == "bR") rights += "q";
+        }
+        
+        return string.IsNullOrEmpty(rights) ? "-" : rights;
+    }
+
+    private string? clipboardMessage;
+    
+    private async Task CopyToClipboard(string text)
+    {
+        try
+        {
+            var result = await JSRuntime.InvokeAsync<ClipboardResult>("copyToClipboardFallback", text);
+            if (result.Success)
+            {
+                clipboardMessage = "✓ Copied!";
+            }
+            else
+            {
+                // Show the text in an alert for manual copying on iOS
+                clipboardMessage = "Select & copy: " + text;
+            }
+            StateHasChanged();
+            await Task.Delay(3000);
+            clipboardMessage = null;
+            StateHasChanged();
+        }
+        catch
+        {
+            clipboardMessage = "Long-press to copy: " + text;
+            StateHasChanged();
+        }
+    }
+
+    private class ClipboardResult
+    {
+        public bool Success { get; set; }
+        public string? Text { get; set; }
+    }
+
+    // Model classes
+    public class PredictionResult
+    {
+        public bool Success { get; set; }
+        public string? Fen { get; set; }
+        public string[][]? Board { get; set; }
+        public string? Error { get; set; }
+        public DebugImagesModel? DebugImages { get; set; }
+    }
+
+    public class DebugImagesModel
+    {
+        public string? Detection { get; set; }
+        public string? Warped { get; set; }
+        public string? Overlay { get; set; }
+    }
+
+    public class ModelInfo
+    {
+        public string Name { get; set; } = "";
+        public string Type { get; set; } = "";
+        public string? Accuracy { get; set; }
+        public bool IsBest { get; set; }
+    }
+
+    // FEN Validation
+    public class FenValidationResult
+    {
+        public bool IsValid { get; set; }
+        public List<string> Issues { get; set; } = new();
+    }
+
+    private FenValidationResult ValidateFen(string fen)
+    {
+        var result = new FenValidationResult { IsValid = true };
+        
+        if (string.IsNullOrWhiteSpace(fen))
+        {
+            result.IsValid = false;
+            result.Issues.Add("FEN string is empty");
+            return result;
+        }
+
+        // Take only the piece placement part (before any space)
+        var piecePlacement = fen.Split(' ')[0];
+        var ranks = piecePlacement.Split('/');
+
+        // Must have 8 ranks
+        if (ranks.Length != 8)
+        {
+            result.IsValid = false;
+            result.Issues.Add($"Expected 8 ranks, found {ranks.Length}");
+            return result;
+        }
+
+        int whiteKings = 0, blackKings = 0;
+        int whitePawns = 0, blackPawns = 0;
+        var validPieces = "KQRBNPkqrbnp";
+
+        for (int i = 0; i < 8; i++)
+        {
+            var rank = ranks[i];
+            int squareCount = 0;
+
+            foreach (char c in rank)
+            {
+                if (char.IsDigit(c))
+                {
+                    squareCount += c - '0';
+                }
+                else if (validPieces.Contains(c))
+                {
+                    squareCount++;
+                    
+                    // Count pieces
+                    switch (c)
+                    {
+                        case 'K': whiteKings++; break;
+                        case 'k': blackKings++; break;
+                        case 'P': whitePawns++; break;
+                        case 'p': blackPawns++; break;
+                    }
+                    
+                    // Check for pawns on 1st or 8th rank
+                    if ((c == 'P' || c == 'p') && (i == 0 || i == 7))
+                    {
+                        result.Issues.Add($"Pawn on rank {8-i} (illegal position)");
+                    }
+                }
+                else
+                {
+                    result.IsValid = false;
+                    result.Issues.Add($"Invalid character '{c}' in rank {8-i}");
+                }
+            }
+
+            if (squareCount != 8)
+            {
+                result.IsValid = false;
+                result.Issues.Add($"Rank {8-i} has {squareCount} squares (expected 8)");
+            }
+        }
+
+        // King validation
+        if (whiteKings == 0)
+        {
+            result.IsValid = false;
+            result.Issues.Add("Missing white king (♔)");
+        }
+        else if (whiteKings > 1)
+        {
+            result.IsValid = false;
+            result.Issues.Add($"Too many white kings: {whiteKings}");
+        }
+
+        if (blackKings == 0)
+        {
+            result.IsValid = false;
+            result.Issues.Add("Missing black king (♚)");
+        }
+        else if (blackKings > 1)
+        {
+            result.IsValid = false;
+            result.Issues.Add($"Too many black kings: {blackKings}");
+        }
+
+        // Pawn count validation
+        if (whitePawns > 8)
+        {
+            result.Issues.Add($"Too many white pawns: {whitePawns}");
+        }
+        if (blackPawns > 8)
+        {
+            result.Issues.Add($"Too many black pawns: {blackPawns}");
+        }
+
+        // If we have issues but IsValid is still true, it means warnings only
+        if (result.Issues.Count > 0 && result.IsValid)
+        {
+            // Keep as valid but with warnings
+        }
+
+        return result;
+    }
+}
+

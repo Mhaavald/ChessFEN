@@ -1,0 +1,42 @@
+Microsoft Visual Studio Solution File, Format Version 12.00
+# Visual Studio Version 17
+VisualStudioVersion = 17.5.2.0
+MinimumVisualStudioVersion = 10.0.40219.1
+Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "web", "web", "{256F4E96-6A73-9ABE-786F-840C672A50F4}"
+EndProject
+Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "ChessFEN.Api", "ChessFEN.Api", "{54851D95-20C4-1B73-FD33-704EC121F8D9}"
+EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "ChessFEN.Api", "web\ChessFEN.Api\ChessFEN.Api\ChessFEN.Api.csproj", "{1F2BDE00-F451-542A-2948-E18CBADD693C}"
+EndProject
+Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "ChessFEN.Web", "ChessFEN.Web", "{C1E82AEC-9FD3-7FED-F320-3882095E6FDE}"
+EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "ChessFEN.Web", "web\ChessFEN.Web\ChessFEN.Web\ChessFEN.Web.csproj", "{7178A74C-E51C-B39E-9930-0EAE53809107}"
+EndProject
+Global
+	GlobalSection(SolutionConfigurationPlatforms) = preSolution
+		Debug|Any CPU = Debug|Any CPU
+		Release|Any CPU = Release|Any CPU
+	EndGlobalSection
+	GlobalSection(ProjectConfigurationPlatforms) = postSolution
+		{1F2BDE00-F451-542A-2948-E18CBADD693C}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{1F2BDE00-F451-542A-2948-E18CBADD693C}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{1F2BDE00-F451-542A-2948-E18CBADD693C}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{1F2BDE00-F451-542A-2948-E18CBADD693C}.Release|Any CPU.Build.0 = Release|Any CPU
+		{7178A74C-E51C-B39E-9930-0EAE53809107}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{7178A74C-E51C-B39E-9930-0EAE53809107}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{7178A74C-E51C-B39E-9930-0EAE53809107}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{7178A74C-E51C-B39E-9930-0EAE53809107}.Release|Any CPU.Build.0 = Release|Any CPU
+	EndGlobalSection
+	GlobalSection(SolutionProperties) = preSolution
+		HideSolutionNode = FALSE
+	EndGlobalSection
+	GlobalSection(NestedProjects) = preSolution
+		{54851D95-20C4-1B73-FD33-704EC121F8D9} = {256F4E96-6A73-9ABE-786F-840C672A50F4}
+		{1F2BDE00-F451-542A-2948-E18CBADD693C} = {54851D95-20C4-1B73-FD33-704EC121F8D9}
+		{C1E82AEC-9FD3-7FED-F320-3882095E6FDE} = {256F4E96-6A73-9ABE-786F-840C672A50F4}
+		{7178A74C-E51C-B39E-9930-0EAE53809107} = {C1E82AEC-9FD3-7FED-F320-3882095E6FDE}
+	EndGlobalSection
+	GlobalSection(ExtensibilityGlobals) = postSolution
+		SolutionGuid = {599E71F5-F439-41EF-8A31-01E9B8E2E49D}
+	EndGlobalSection
+EndGlobal
