@@ -250,6 +250,94 @@ public class ChessController : ControllerBase
     }
 
     /// <summary>
+    /// Check if games exist on Chess.com for a given FEN
+    /// </summary>
+    [HttpGet("chess-com-search")]
+    public async Task<ActionResult<ChessComSearchResult>> SearchChessCom([FromQuery] string fen)
+    {
+        if (string.IsNullOrEmpty(fen))
+        {
+            return BadRequest(new ChessComSearchResult { Success = false, Error = "FEN is required" });
+        }
+
+        try
+        {
+            using var httpClient = new HttpClient();
+            // Use a browser-like User-Agent to get the same response as a browser
+            httpClient.DefaultRequestHeaders.Add("User-Agent", 
+                "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36");
+            httpClient.DefaultRequestHeaders.Add("Accept", "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8");
+            httpClient.DefaultRequestHeaders.Add("Accept-Language", "en-US,en;q=0.5");
+            
+            var encodedFen = Uri.EscapeDataString(fen);
+            var url = $"https://www.chess.com/games/search?fen={encodedFen}";
+            
+            var response = await httpClient.GetAsync(url);
+            var html = await response.Content.ReadAsStringAsync();
+            
+            // Primary check: explicit "no games" message - this is the most reliable indicator
+            var noGamesIndicators = new[]
+            {
+                "Your search did not match any games",
+                "did not match any games"
+            };
+            
+            var hasNoGamesMessage = noGamesIndicators.Any(indicator => 
+                html.Contains(indicator, StringComparison.OrdinalIgnoreCase));
+            
+            // If we have a clear "no games" message, trust it
+            if (hasNoGamesMessage)
+            {
+                _logger.LogInformation("Chess.com search: No games found (explicit message) for FEN: {Fen}", 
+                    fen.Length > 30 ? fen.Substring(0, 30) + "..." : fen);
+                    
+                return Ok(new ChessComSearchResult
+                {
+                    Success = true,
+                    GamesFound = false,
+                    SearchUrl = url,
+                    Message = "No games found for this position."
+                });
+            }
+            
+            // Secondary check: look for actual game data
+            // These are specific to actual game listings
+            var gamesFoundIndicators = new[]
+            {
+                "master-games-master-game",   // Master games table row
+                "master-games-username",      // Player name in master games
+                "archived-games-game-row",    // Archived game row
+                "/game/live/",               // Link to a live game
+                "/game/daily/",              // Link to a daily game
+            };
+            
+            var hasGamesIndicator = gamesFoundIndicators.Any(indicator => 
+                html.Contains(indicator, StringComparison.OrdinalIgnoreCase));
+            
+            _logger.LogInformation("Chess.com search for FEN: {Fen}, GamesFound: {GamesInd}", 
+                fen.Length > 30 ? fen.Substring(0, 30) + "..." : fen, hasGamesIndicator);
+            
+            return Ok(new ChessComSearchResult
+            {
+                Success = true,
+                GamesFound = hasGamesIndicator,
+                SearchUrl = url,
+                Message = hasGamesIndicator ? "Games found on Chess.com!" : "No games found for this position."
+            });
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Error searching Chess.com");
+            return Ok(new ChessComSearchResult
+            {
+                Success = false,
+                GamesFound = false,
+                Error = ex.Message
+            });
+        }
+    }
+
+    /// <summary>
     /// Health check
     /// </summary>
     [HttpGet("health")]
@@ -267,4 +355,16 @@ public class ChessController : ControllerBase
             return StatusCode(503, new { status = "unhealthy", error = ex.Message });
         }
     }
+}
+
+/// <summary>
+/// Result from Chess.com game search
+/// </summary>
+public class ChessComSearchResult
+{
+    public bool Success { get; set; }
+    public bool GamesFound { get; set; }
+    public string? SearchUrl { get; set; }
+    public string? Message { get; set; }
+    public string? Error { get; set; }
 }

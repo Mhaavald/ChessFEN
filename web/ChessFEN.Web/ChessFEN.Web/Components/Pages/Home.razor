@@ -154,20 +154,35 @@
                         <!-- Search Games -->
                         <div class="mb-3">
                             <label class="form-label fw-bold">🔍 Find Games with this Position:</label>
-                            <div class="d-flex gap-2 flex-wrap">
+                            <div class="d-flex gap-2 flex-wrap align-items-center">
                                 <a href="@GetChessComSearchUrl("w")" target="_blank" class="btn btn-success btn-sm">
                                     ♔ Chess.com (White to move)
                                 </a>
                                 <a href="@GetChessComSearchUrl("b")" target="_blank" class="btn btn-success btn-sm">
                                     ♚ Chess.com (Black to move)
                                 </a>
-                                <a href="@GetLichessSearchUrl("w")" target="_blank" class="btn btn-outline-dark btn-sm">
-                                    Lichess (White)
-                                </a>
-                                <a href="@GetLichessSearchUrl("b")" target="_blank" class="btn btn-outline-dark btn-sm">
-                                    Lichess (Black)
-                                </a>
+                                <button type="button" class="btn btn-outline-info btn-sm" @onclick="CheckChessComGames" disabled="@isCheckingGames">
+                                    @if (isCheckingGames)
+                                    {
+                                        <span class="spinner-border spinner-border-sm me-1"></span>
+                                    }
+                                    🔎 Check if games exist
+                                </button>
                             </div>
+                            
+                            <!-- Chess.com search results -->
+                            @if (chessComSearchResults.Count > 0)
+                            {
+                                <div class="mt-2">
+                                    @foreach (var result in chessComSearchResults)
+                                    {
+                                        <div class="badge @(result.GamesFound ? "bg-success" : "bg-secondary") me-2 mb-1">
+                                            @(result.Side == "w" ? "♔ White" : "♚ Black"): 
+                                            @(result.GamesFound ? "✓ Games found" : "✗ No games")
+                                        </div>
+                                    }
+                                </div>
+                            }
                         </div>
                         
                         <!-- FEN Validation -->
@@ -495,6 +510,10 @@
     
     private int testCounter = 0;
     
+    // Chess.com game search
+    private bool isCheckingGames = false;
+    private List<ChessComSearchResultItem> chessComSearchResults = new();
+    
     private Dictionary<string, string> pieceOptions = new()
     {
         { "empty", "·" },
@@ -729,6 +748,7 @@
             corrections[square] = selectedPalettePiece;
             resultFen = GenerateFenFromBoard();
             fenValidation = ValidateFen(resultFen ?? "");
+            chessComSearchResults.Clear(); // Clear old search results
             StateHasChanged();
         }
     }
@@ -743,6 +763,7 @@
         fenValidation = ValidateFen(resultFen ?? "");
         corrections.Clear();
         corrections["cleared"] = "all";
+        chessComSearchResults.Clear(); // Clear old search results
         StateHasChanged();
     }
     
@@ -754,6 +775,7 @@
         ParseFenToBoard(originalFen);
         fenValidation = ValidateFen(resultFen ?? "");
         corrections.Clear();
+        chessComSearchResults.Clear(); // Clear old search results
         StateHasChanged();
     }
     
@@ -908,6 +930,58 @@
         // Lichess uses analysis board with FEN parameter
         var encodedFen = Uri.EscapeDataString(fullFen);
         return $"https://lichess.org/analysis?fen={encodedFen}";
+    }
+    
+    private async Task CheckChessComGames()
+    {
+        if (string.IsNullOrEmpty(resultFen)) return;
+        
+        isCheckingGames = true;
+        chessComSearchResults.Clear();
+        StateHasChanged();
+        
+        try
+        {
+            // Check both white and black to move
+            foreach (var side in new[] { "w", "b" })
+            {
+                var fullFen = GetFullFen(side);
+                var encodedFen = Uri.EscapeDataString(fullFen);
+                
+                var response = await Http.GetAsync($"/api/chess/chess-com-search?fen={encodedFen}");
+                if (response.IsSuccessStatusCode)
+                {
+                    var json = await response.Content.ReadAsStringAsync();
+                    var result = JsonSerializer.Deserialize<ChessComSearchResponse>(json, 
+                        new JsonSerializerOptions { PropertyNameCaseInsensitive = true });
+                    
+                    chessComSearchResults.Add(new ChessComSearchResultItem
+                    {
+                        Side = side,
+                        GamesFound = result?.GamesFound ?? false,
+                        Message = result?.Message
+                    });
+                }
+                else
+                {
+                    chessComSearchResults.Add(new ChessComSearchResultItem
+                    {
+                        Side = side,
+                        GamesFound = false,
+                        Message = "Error checking"
+                    });
+                }
+            }
+        }
+        catch (Exception ex)
+        {
+            Log($"Error checking Chess.com: {ex.Message}");
+        }
+        finally
+        {
+            isCheckingGames = false;
+            StateHasChanged();
+        }
     }
 
     private string InferCastlingRights()
@@ -1206,6 +1280,23 @@
         }
 
         return result;
+    }
+    
+    // Chess.com search models
+    public class ChessComSearchResponse
+    {
+        public bool Success { get; set; }
+        public bool GamesFound { get; set; }
+        public string? SearchUrl { get; set; }
+        public string? Message { get; set; }
+        public string? Error { get; set; }
+    }
+    
+    public class ChessComSearchResultItem
+    {
+        public string Side { get; set; } = "";
+        public bool GamesFound { get; set; }
+        public string? Message { get; set; }
     }
 }
 
