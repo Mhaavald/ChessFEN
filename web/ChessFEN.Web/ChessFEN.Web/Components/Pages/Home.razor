@@ -151,58 +151,109 @@
                             </div>
                         </div>
                         
+                        <!-- Search Games -->
+                        <div class="mb-3">
+                            <label class="form-label fw-bold">🔍 Find Games with this Position:</label>
+                            <div class="d-flex gap-2 flex-wrap">
+                                <a href="@GetChessComSearchUrl("w")" target="_blank" class="btn btn-success btn-sm">
+                                    ♔ Chess.com (White to move)
+                                </a>
+                                <a href="@GetChessComSearchUrl("b")" target="_blank" class="btn btn-success btn-sm">
+                                    ♚ Chess.com (Black to move)
+                                </a>
+                                <a href="@GetLichessSearchUrl("w")" target="_blank" class="btn btn-outline-dark btn-sm">
+                                    Lichess (White)
+                                </a>
+                                <a href="@GetLichessSearchUrl("b")" target="_blank" class="btn btn-outline-dark btn-sm">
+                                    Lichess (Black)
+                                </a>
+                            </div>
+                        </div>
+                        
                         <!-- FEN Validation -->
                         @if (fenValidation != null)
                         {
-                            <div class="alert @(fenValidation.IsValid ? "alert-success" : "alert-warning") py-2">
-                                @if (fenValidation.IsValid)
-                                {
+                            @if (fenValidation.IsValid && fenValidation.Warnings.Count == 0)
+                            {
+                                <div class="alert alert-success py-2">
                                     <span>✅ Valid chess position</span>
-                                }
-                                else
-                                {
-                                    <span>⚠️ Position issues:</span>
+                                </div>
+                            }
+                            else if (fenValidation.IsValid && fenValidation.Warnings.Count > 0)
+                            {
+                                <div class="alert alert-info py-2">
+                                    <span>✅ Valid position with notes:</span>
+                                    <ul class="mb-0 small">
+                                        @foreach (var warning in fenValidation.Warnings)
+                                        {
+                                            <li>⚠️ @warning</li>
+                                        }
+                                    </ul>
+                                </div>
+                            }
+                            else
+                            {
+                                <div class="alert alert-danger py-2">
+                                    <span>❌ Invalid position:</span>
                                     <ul class="mb-0 small">
                                         @foreach (var issue in fenValidation.Issues)
                                         {
                                             <li>@issue</li>
                                         }
                                     </ul>
-                                }
-                            </div>
+                                    @if (fenValidation.Warnings.Count > 0)
+                                    {
+                                        <hr class="my-1" />
+                                        <span class="small">Warnings:</span>
+                                        <ul class="mb-0 small">
+                                            @foreach (var warning in fenValidation.Warnings)
+                                            {
+                                                <li>⚠️ @warning</li>
+                                            }
+                                        </ul>
+                                    }
+                                </div>
+                            }
                         }
                         
                         <!-- Chess Board Display -->
                         <div class="chess-board-container mb-3">
+                            <!-- Piece Palette -->
+                            <div class="piece-palette mb-2 text-center">
+                                <span class="palette-label">Select piece:</span>
+                                @foreach (var p in pieceOptions)
+                                {
+                                    var pieceKey = p.Key;
+                                    <button type="button" 
+                                            class="btn btn-sm piece-btn @(selectedPalettePiece == pieceKey ? "active" : "")"
+                                            @onclick="() => SelectPalettePiece(pieceKey)"
+                                            title="@GetPieceName(pieceKey)">
+                                        @p.Value
+                                    </button>
+                                }
+                                @if (!string.IsNullOrEmpty(selectedPalettePiece))
+                                {
+                                    <span class="ms-2 text-muted small">Click a square to place @GetPieceName(selectedPalettePiece)</span>
+                                }
+                            </div>
+                            
                             <table class="chess-board mx-auto">
                                 @for (int row = 0; row < 8; row++)
                                 {
                                     var r = row;
                                     <tr>
-                                        <td class="rank-label">@(8 - row)</td>
+                                        <td class="rank-label">@(8 - r)</td>
                                         @for (int col = 0; col < 8; col++)
                                         {
                                             var c = col;
-                                            var isLight = (row + col) % 2 == 0;
-                                            var square = $"{(char)('a' + col)}{8 - row}";
-                                            var piece = boardPieces[row, col];
-                                            var isEditing = editingSquare == square;
+                                            var isLight = (r + c) % 2 == 0;
+                                            var square = $"{(char)('a' + c)}{8 - r}";
+                                            var piece = boardPieces[r, c];
                                             
-                                            <td class="@(isLight ? "light" : "dark") @(isEditing ? "editing" : "")" 
-                                                @onclick="() => StartEditing(square, row, col)">
-                                                @if (isEditing)
-                                                {
-                                                    <select class="piece-select" @onchange="e => UpdatePiece(square, row, col, e.Value?.ToString())">
-                                                        @foreach (var p in pieceOptions)
-                                                        {
-                                                            <option value="@p.Key" selected="@(p.Key == piece)">@p.Value</option>
-                                                        }
-                                                    </select>
-                                                }
-                                                else
-                                                {
-                                                    <span class="piece">@GetPieceUnicode(piece)</span>
-                                                }
+                                            <td class="@(isLight ? "light" : "dark")" 
+                                                @onclick="() => OnSquareClick(square, r, c)"
+                                                title="@square: @GetPieceName(piece)">
+                                                <span class="piece">@GetPieceUnicode(piece)</span>
                                             </td>
                                         }
                                     </tr>
@@ -215,6 +266,16 @@
                                     }
                                 </tr>
                             </table>
+                            
+                            <!-- Quick actions -->
+                            <div class="mt-2 text-center">
+                                <button class="btn btn-sm btn-outline-secondary" @onclick="ClearBoard" title="Clear all pieces">
+                                    🗑️ Clear
+                                </button>
+                                <button class="btn btn-sm btn-outline-secondary" @onclick="ResetToOriginal" title="Reset to detected position" disabled="@(originalFen == resultFen)">
+                                    ↩️ Reset
+                                </button>
+                            </div>
                         </div>
                         
                         <!-- Correction Actions -->
@@ -280,23 +341,54 @@
         text-align: center;
         vertical-align: middle;
         cursor: pointer;
+        user-select: none;
     }
     .chess-board td.light { background-color: #f0d9b5; }
     .chess-board td.dark { background-color: #b58863; }
-    .chess-board td.editing { background-color: #7fb3d5 !important; }
     .chess-board td:hover:not(.rank-label):not(.file-label) { 
-        outline: 2px solid #007bff; 
+        outline: 3px solid #007bff; 
+        outline-offset: -3px;
     }
-    .piece { font-size: 32px; }
-    .piece-select { 
-        width: 100%; 
-        font-size: 20px; 
-        text-align: center;
-    }
+    .piece { font-size: 32px; pointer-events: none; }
     .rank-label, .file-label {
         font-weight: bold;
         background: transparent !important;
         cursor: default;
+    }
+    
+    /* Piece palette */
+    .piece-palette {
+        padding: 8px;
+        background: #f8f9fa;
+        border-radius: 8px;
+        display: flex;
+        flex-wrap: wrap;
+        align-items: center;
+        justify-content: center;
+        gap: 4px;
+    }
+    .palette-label {
+        font-size: 14px;
+        color: #666;
+        margin-right: 8px;
+    }
+    .piece-btn {
+        width: 36px;
+        height: 36px;
+        font-size: 24px;
+        padding: 0;
+        line-height: 1;
+        border: 2px solid #ddd;
+        background: white;
+    }
+    .piece-btn:hover {
+        border-color: #007bff;
+        background: #e7f1ff;
+    }
+    .piece-btn.active {
+        border-color: #007bff;
+        background: #cce5ff;
+        box-shadow: 0 0 0 2px rgba(0,123,255,0.25);
     }
 </style>
 
@@ -405,10 +497,12 @@
     
     private Dictionary<string, string> pieceOptions = new()
     {
-        { "empty", " " },
-        { "wP", "♙" }, { "wN", "♘" }, { "wB", "♗" }, { "wR", "♖" }, { "wQ", "♕" }, { "wK", "♔" },
-        { "bP", "♟" }, { "bN", "♞" }, { "bB", "♝" }, { "bR", "♜" }, { "bQ", "♛" }, { "bK", "♚" }
+        { "empty", "·" },
+        { "wK", "♔" }, { "wQ", "♕" }, { "wR", "♖" }, { "wB", "♗" }, { "wN", "♘" }, { "wP", "♙" },
+        { "bK", "♚" }, { "bQ", "♛" }, { "bR", "♜" }, { "bB", "♝" }, { "bN", "♞" }, { "bP", "♟" }
     };
+    
+    private string? selectedPalettePiece = "empty";
     
     private void Log(string message)
     {
@@ -605,8 +699,93 @@
 
     private string GetPieceUnicode(string piece)
     {
-        return pieceOptions.TryGetValue(piece, out var unicode) ? unicode : " ";
+        if (piece == "empty") return "";
+        return pieceOptions.TryGetValue(piece, out var unicode) ? unicode : "";
     }
+    
+    private string GetPieceName(string piece) => piece switch
+    {
+        "empty" => "Empty",
+        "wK" => "White King", "wQ" => "White Queen", "wR" => "White Rook",
+        "wB" => "White Bishop", "wN" => "White Knight", "wP" => "White Pawn",
+        "bK" => "Black King", "bQ" => "Black Queen", "bR" => "Black Rook",
+        "bB" => "Black Bishop", "bN" => "Black Knight", "bP" => "Black Pawn",
+        _ => piece
+    };
+    
+    private void SelectPalettePiece(string piece)
+    {
+        selectedPalettePiece = piece;
+    }
+    
+    private void OnSquareClick(string square, int row, int col)
+    {
+        if (string.IsNullOrEmpty(selectedPalettePiece)) return;
+        
+        var oldPiece = boardPieces[row, col];
+        if (oldPiece != selectedPalettePiece)
+        {
+            boardPieces[row, col] = selectedPalettePiece;
+            corrections[square] = selectedPalettePiece;
+            resultFen = GenerateFenFromBoard();
+            fenValidation = ValidateFen(resultFen ?? "");
+            StateHasChanged();
+        }
+    }
+    
+    private void ClearBoard()
+    {
+        for (int r = 0; r < 8; r++)
+            for (int c = 0; c < 8; c++)
+                boardPieces[r, c] = "empty";
+        
+        resultFen = GenerateFenFromBoard();
+        fenValidation = ValidateFen(resultFen ?? "");
+        corrections.Clear();
+        corrections["cleared"] = "all";
+        StateHasChanged();
+    }
+    
+    private void ResetToOriginal()
+    {
+        if (string.IsNullOrEmpty(originalFen)) return;
+        
+        resultFen = originalFen;
+        ParseFenToBoard(originalFen);
+        fenValidation = ValidateFen(resultFen ?? "");
+        corrections.Clear();
+        StateHasChanged();
+    }
+    
+    private void ParseFenToBoard(string fen)
+    {
+        var piecePlacement = fen.Split(' ')[0];
+        var ranks = piecePlacement.Split('/');
+        
+        for (int r = 0; r < 8 && r < ranks.Length; r++)
+        {
+            int col = 0;
+            foreach (char c in ranks[r])
+            {
+                if (char.IsDigit(c))
+                {
+                    for (int i = 0; i < (c - '0') && col < 8; i++)
+                        boardPieces[r, col++] = "empty";
+                }
+                else
+                {
+                    boardPieces[r, col++] = FenCharToPiece(c);
+                }
+            }
+        }
+    }
+    
+    private string FenCharToPiece(char c) => c switch
+    {
+        'K' => "wK", 'Q' => "wQ", 'R' => "wR", 'B' => "wB", 'N' => "wN", 'P' => "wP",
+        'k' => "bK", 'q' => "bQ", 'r' => "bR", 'b' => "bB", 'n' => "bN", 'p' => "bP",
+        _ => "empty"
+    };
 
     private void StartEditing(string square, int row, int col)
     {
@@ -711,6 +890,25 @@
         // Format: [pieces] [side] [castling] [enpassant] [halfmove] [fullmove]
         return $"{resultFen} {sideToMove} {castling} - 0 1";
     }
+    
+    private string GetChessComSearchUrl(string sideToMove)
+    {
+        var fullFen = GetFullFen(sideToMove);
+        if (string.IsNullOrEmpty(fullFen)) return "#";
+        
+        var encodedFen = Uri.EscapeDataString(fullFen);
+        return $"https://www.chess.com/games/search?fen={encodedFen}";
+    }
+    
+    private string GetLichessSearchUrl(string sideToMove)
+    {
+        var fullFen = GetFullFen(sideToMove);
+        if (string.IsNullOrEmpty(fullFen)) return "#";
+        
+        // Lichess uses analysis board with FEN parameter
+        var encodedFen = Uri.EscapeDataString(fullFen);
+        return $"https://lichess.org/analysis?fen={encodedFen}";
+    }
 
     private string InferCastlingRights()
     {
@@ -802,6 +1000,7 @@
     {
         public bool IsValid { get; set; }
         public List<string> Issues { get; set; } = new();
+        public List<string> Warnings { get; set; } = new();
     }
 
     private FenValidationResult ValidateFen(string fen)
@@ -827,91 +1026,183 @@
             return result;
         }
 
+        // Count all pieces
         int whiteKings = 0, blackKings = 0;
+        int whiteQueens = 0, blackQueens = 0;
+        int whiteRooks = 0, blackRooks = 0;
+        int whiteBishops = 0, blackBishops = 0;
+        int whiteKnights = 0, blackKnights = 0;
         int whitePawns = 0, blackPawns = 0;
         var validPieces = "KQRBNPkqrbnp";
+        
+        // Track bishop square colors
+        bool whiteBishopOnLight = false, whiteBishopOnDark = false;
+        bool blackBishopOnLight = false, blackBishopOnDark = false;
 
-        for (int i = 0; i < 8; i++)
+        for (int rankIdx = 0; rankIdx < 8; rankIdx++)
         {
-            var rank = ranks[i];
-            int squareCount = 0;
+            var rank = ranks[rankIdx];
+            int col = 0;
 
             foreach (char c in rank)
             {
                 if (char.IsDigit(c))
                 {
-                    squareCount += c - '0';
+                    int emptyCount = c - '0';
+                    if (emptyCount < 1 || emptyCount > 8)
+                    {
+                        result.IsValid = false;
+                        result.Issues.Add($"Invalid empty square count '{c}' in rank {8-rankIdx}");
+                    }
+                    col += emptyCount;
                 }
                 else if (validPieces.Contains(c))
                 {
-                    squareCount++;
+                    bool isLightSquare = (rankIdx + col) % 2 == 0;
                     
-                    // Count pieces
+                    // Count pieces and track bishops
                     switch (c)
                     {
                         case 'K': whiteKings++; break;
                         case 'k': blackKings++; break;
+                        case 'Q': whiteQueens++; break;
+                        case 'q': blackQueens++; break;
+                        case 'R': whiteRooks++; break;
+                        case 'r': blackRooks++; break;
+                        case 'B': 
+                            whiteBishops++; 
+                            if (isLightSquare) whiteBishopOnLight = true; else whiteBishopOnDark = true;
+                            break;
+                        case 'b': 
+                            blackBishops++; 
+                            if (isLightSquare) blackBishopOnLight = true; else blackBishopOnDark = true;
+                            break;
+                        case 'N': whiteKnights++; break;
+                        case 'n': blackKnights++; break;
                         case 'P': whitePawns++; break;
                         case 'p': blackPawns++; break;
                     }
                     
-                    // Check for pawns on 1st or 8th rank
-                    if ((c == 'P' || c == 'p') && (i == 0 || i == 7))
+                    // Check for pawns on 1st or 8th rank (illegal)
+                    if ((c == 'P' || c == 'p') && (rankIdx == 0 || rankIdx == 7))
                     {
-                        result.Issues.Add($"Pawn on rank {8-i} (illegal position)");
+                        result.IsValid = false;
+                        result.Issues.Add($"Pawn on rank {8-rankIdx} is illegal");
                     }
+                    
+                    col++;
                 }
                 else
                 {
                     result.IsValid = false;
-                    result.Issues.Add($"Invalid character '{c}' in rank {8-i}");
+                    result.Issues.Add($"Invalid character '{c}' in rank {8-rankIdx}");
                 }
             }
 
-            if (squareCount != 8)
+            if (col != 8)
             {
                 result.IsValid = false;
-                result.Issues.Add($"Rank {8-i} has {squareCount} squares (expected 8)");
+                result.Issues.Add($"Rank {8-rankIdx} has {col} squares (expected 8)");
             }
         }
 
-        // King validation
+        // === CRITICAL VALIDATIONS (make position invalid) ===
+        
+        // King validation - exactly one of each required
         if (whiteKings == 0)
         {
             result.IsValid = false;
-            result.Issues.Add("Missing white king (♔)");
+            result.Issues.Add("Missing white king ♔");
         }
         else if (whiteKings > 1)
         {
             result.IsValid = false;
-            result.Issues.Add($"Too many white kings: {whiteKings}");
+            result.Issues.Add($"Too many white kings: {whiteKings} (max 1)");
         }
 
         if (blackKings == 0)
         {
             result.IsValid = false;
-            result.Issues.Add("Missing black king (♚)");
+            result.Issues.Add("Missing black king ♚");
         }
         else if (blackKings > 1)
         {
             result.IsValid = false;
-            result.Issues.Add($"Too many black kings: {blackKings}");
+            result.Issues.Add($"Too many black kings: {blackKings} (max 1)");
         }
-
-        // Pawn count validation
+        
+        // Pawn count - max 8 each
         if (whitePawns > 8)
         {
-            result.Issues.Add($"Too many white pawns: {whitePawns}");
+            result.IsValid = false;
+            result.Issues.Add($"Too many white pawns: {whitePawns} (max 8)");
         }
         if (blackPawns > 8)
         {
-            result.Issues.Add($"Too many black pawns: {blackPawns}");
+            result.IsValid = false;
+            result.Issues.Add($"Too many black pawns: {blackPawns} (max 8)");
         }
 
-        // If we have issues but IsValid is still true, it means warnings only
-        if (result.Issues.Count > 0 && result.IsValid)
+        // === WARNINGS (unusual but technically possible with promotions) ===
+        
+        // Calculate max possible promoted pieces (8 pawns - current pawns = max promotions)
+        int whitePossiblePromotions = 8 - whitePawns;
+        int blackPossiblePromotions = 8 - blackPawns;
+        
+        // Extra pieces beyond starting count
+        int whiteExtraQueens = Math.Max(0, whiteQueens - 1);
+        int whiteExtraRooks = Math.Max(0, whiteRooks - 2);
+        int whiteExtraBishops = Math.Max(0, whiteBishops - 2);
+        int whiteExtraKnights = Math.Max(0, whiteKnights - 2);
+        int whiteTotalExtra = whiteExtraQueens + whiteExtraRooks + whiteExtraBishops + whiteExtraKnights;
+        
+        int blackExtraQueens = Math.Max(0, blackQueens - 1);
+        int blackExtraRooks = Math.Max(0, blackRooks - 2);
+        int blackExtraBishops = Math.Max(0, blackBishops - 2);
+        int blackExtraKnights = Math.Max(0, blackKnights - 2);
+        int blackTotalExtra = blackExtraQueens + blackExtraRooks + blackExtraBishops + blackExtraKnights;
+        
+        // Check if promotions exceed what's possible
+        if (whiteTotalExtra > whitePossiblePromotions)
         {
-            // Keep as valid but with warnings
+            result.Warnings.Add($"White has {whiteTotalExtra} extra pieces but only {whitePossiblePromotions} possible promotions");
+        }
+        if (blackTotalExtra > blackPossiblePromotions)
+        {
+            result.Warnings.Add($"Black has {blackTotalExtra} extra pieces but only {blackPossiblePromotions} possible promotions");
+        }
+        
+        // Two bishops on same color is unusual (possible via promotion, but rare)
+        if (whiteBishops >= 2 && whiteBishopOnLight && !whiteBishopOnDark)
+        {
+            result.Warnings.Add("White has 2+ bishops, all on light squares");
+        }
+        if (whiteBishops >= 2 && whiteBishopOnDark && !whiteBishopOnLight)
+        {
+            result.Warnings.Add("White has 2+ bishops, all on dark squares");
+        }
+        if (blackBishops >= 2 && blackBishopOnLight && !blackBishopOnDark)
+        {
+            result.Warnings.Add("Black has 2+ bishops, all on light squares");
+        }
+        if (blackBishops >= 2 && blackBishopOnDark && !blackBishopOnLight)
+        {
+            result.Warnings.Add("Black has 2+ bishops, all on dark squares");
+        }
+        
+        // Total piece count check (max 16 per side)
+        int whiteTotalPieces = whiteKings + whiteQueens + whiteRooks + whiteBishops + whiteKnights + whitePawns;
+        int blackTotalPieces = blackKings + blackQueens + blackRooks + blackBishops + blackKnights + blackPawns;
+        
+        if (whiteTotalPieces > 16)
+        {
+            result.IsValid = false;
+            result.Issues.Add($"White has {whiteTotalPieces} pieces (max 16)");
+        }
+        if (blackTotalPieces > 16)
+        {
+            result.IsValid = false;
+            result.Issues.Add($"Black has {blackTotalPieces} pieces (max 16)");
         }
 
         return result;

@@ -1,0 +1,162 @@
+### ChessFEN API Test Requests
+### Use with VS Code REST Client extension (humao.rest-client)
+
+@baseUrl = http://localhost:5000
+@pythonServiceUrl = http://localhost:8000
+
+### ============================================
+### Health & Info Endpoints
+### ============================================
+
+### Health check
+GET {{baseUrl}}/api/chess/health
+
+### Get available models
+GET {{baseUrl}}/api/chess/models
+
+### ============================================
+### Prediction Endpoints
+### ============================================
+
+### Predict from base64 image (example - replace with actual base64)
+POST {{baseUrl}}/api/chess/predict/base64
+Content-Type: application/json
+
+{
+    "image": "BASE64_ENCODED_IMAGE_DATA_HERE"
+}
+
+### Predict with debug mode
+POST {{baseUrl}}/api/chess/predict/base64?debug=true
+Content-Type: application/json
+
+{
+    "image": "BASE64_ENCODED_IMAGE_DATA_HERE"
+}
+
+### Predict with specific model
+POST {{baseUrl}}/api/chess/predict/base64?model=chess_resnet18_best
+Content-Type: application/json
+
+{
+    "image": "BASE64_ENCODED_IMAGE_DATA_HERE"
+}
+
+### ============================================
+### Python Inference Service (Direct)
+### ============================================
+
+### Python service health
+GET {{pythonServiceUrl}}/health
+
+### Python service - get models
+GET {{pythonServiceUrl}}/api/models
+
+### ============================================
+### External Chess Database Searches
+### ============================================
+
+### Chess.com game search - Starting position after 1.e4
+GET https://www.chess.com/games/search?fen=rnbqkbnr%2Fpppppppp%2F8%2F8%2F4P3%2F8%2FPPPP1PPP%2FRNBQKBNR%20b%20KQkq%20e3%200%201
+
+### Chess.com game search - Sicilian Defense
+GET https://www.chess.com/games/search?fen=rnbqkbnr%2Fpp1ppppp%2F8%2F2p5%2F4P3%2F8%2FPPPP1PPP%2FRNBQKBNR%20w%20KQkq%20c6%200%202
+
+### Chess.com game search - Italian Game
+GET https://www.chess.com/games/search?fen=r1bqkbnr%2Fpppp1ppp%2F2n5%2F4p3%2F2B1P3%2F5N2%2FPPPP1PPP%2FRNBQK2R%20b%20KQkq%20-%203%203
+
+### Chess.com game search - Ruy Lopez
+GET https://www.chess.com/games/search?fen=r1bqkbnr%2Fpppp1ppp%2F2n5%2F1B2p3%2F4P3%2F5N2%2FPPPP1PPP%2FRNBQK2R%20b%20KQkq%20-%203%203
+
+### Chess.com game search - Example from user (complex position)
+GET https://www.chess.com/games/search?fen=1rb2rk1%2Fp3bpp1%2F1qp1p2p%2F4P3%2F4NQ2%2F1P1B4%2FP1P3PP%2F2KR3R%20b%20-%20-%200%201
+
+### ============================================
+### Lichess Analysis Board
+### ============================================
+
+### Lichess analysis - Starting position after 1.e4
+GET https://lichess.org/analysis?fen=rnbqkbnr%2Fpppppppp%2F8%2F8%2F4P3%2F8%2FPPPP1PPP%2FRNBQKBNR%20b%20KQkq%20e3%200%201
+
+### Lichess analysis - Sicilian Defense
+GET https://lichess.org/analysis?fen=rnbqkbnr%2Fpp1ppppp%2F8%2F2p5%2F4P3%2F8%2FPPPP1PPP%2FRNBQKBNR%20w%20KQkq%20c6%200%202
+
+### Lichess analysis - Italian Game
+GET https://lichess.org/analysis?fen=r1bqkbnr%2Fpppp1ppp%2F2n5%2F4p3%2F2B1P3%2F5N2%2FPPPP1PPP%2FRNBQK2R%20b%20KQkq%20-%203%203
+
+### Lichess analysis - Ruy Lopez
+GET https://lichess.org/analysis?fen=r1bqkbnr%2Fpppp1ppp%2F2n5%2F1B2p3%2F4P3%2F5N2%2FPPPP1PPP%2FRNBQK2R%20b%20KQkq%20-%203%203
+
+### Lichess analysis - Complex position
+GET https://lichess.org/analysis?fen=1rb2rk1%2Fp3bpp1%2F1qp1p2p%2F4P3%2F4NQ2%2F1P1B4%2FP1P3PP%2F2KR3R%20b%20-%20-%200%201
+
+### ============================================
+### Lichess API - Opening Explorer (JSON)
+### ============================================
+
+### Lichess opening explorer - masters database
+GET https://explorer.lichess.ovh/masters?fen=rnbqkbnr/pppppppp/8/8/4P3/8/PPPP1PPP/RNBQKBNR%20b%20KQkq%20-%200%201
+Accept: application/json
+
+### Lichess opening explorer - lichess games
+GET https://explorer.lichess.ovh/lichess?fen=rnbqkbnr/pppppppp/8/8/4P3/8/PPPP1PPP/RNBQKBNR%20b%20KQkq%20-%200%201&ratings=2200,2500&speeds=rapid,classical
+Accept: application/json
+
+### Lichess opening explorer - player games
+GET https://explorer.lichess.ovh/player?player=DrNykterstein&color=white&fen=rnbqkbnr/pppppppp/8/8/4P3/8/PPPP1PPP/RNBQKBNR%20b%20KQkq%20-%200%201
+Accept: application/json
+
+### Lichess cloud evaluation (JSON)
+GET https://lichess.org/api/cloud-eval?fen=rnbqkbnr/pppppppp/8/8/4P3/8/PPPP1PPP/RNBQKBNR%20b%20KQkq%20-%200%201
+Accept: application/json
+
+### Lichess cloud eval - complex position
+GET https://lichess.org/api/cloud-eval?fen=1rb2rk1/p3bpp1/1qp1p2p/4P3/4NQ2/1P1B4/P1P3PP/2KR3R%20b%20-%20-%200%201
+Accept: application/json
+
+### Lichess tablebase lookup (endgame positions, 7 pieces or fewer)
+GET https://tablebase.lichess.ovh/standard?fen=4k3/8/8/8/8/8/4P3/4K3%20w%20-%20-%200%201
+Accept: application/json
+
+### ============================================
+### External Chess Database Searches (HTML pages)
+### ============================================
+
+### ============================================
+### Feedback Endpoint
+### ============================================
+
+### Submit position correction for training
+POST {{baseUrl}}/api/chess/feedback
+Content-Type: application/json
+
+{
+    "originalFen": "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR",
+    "correctedFen": "rnbqkbnr/pppppppp/8/8/4P3/8/PPPP1PPP/RNBQKBNR",
+    "correctedSquares": {
+        "e4": "wP",
+        "e2": "empty"
+    }
+}
+
+### ============================================
+### Example FEN Positions for Testing
+### ============================================
+
+# Starting position:
+# rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1
+
+# After 1.e4:
+# rnbqkbnr/pppppppp/8/8/4P3/8/PPPP1PPP/RNBQKBNR b KQkq e3 0 1
+
+# Sicilian Defense:
+# rnbqkbnr/pp1ppppp/8/2p5/4P3/8/PPPP1PPP/RNBQKBNR w KQkq c6 0 2
+
+# Italian Game:
+# r1bqkbnr/pppp1ppp/2n5/4p3/2B1P3/5N2/PPPP1PPP/RNBQK2R b KQkq - 3 3
+
+# Ruy Lopez:
+# r1bqkbnr/pppp1ppp/2n5/1B2p3/4P3/5N2/PPPP1PPP/RNBQK2R b KQkq - 3 3
+
+# Queen's Gambit:
+# rnbqkbnr/ppp1pppp/8/3p4/2PP4/8/PP2PPPP/RNBQKBNR b KQkq c3 0 2
