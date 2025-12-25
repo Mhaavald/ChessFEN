@@ -304,7 +304,18 @@ def main(image_path: str = None, model_path: str = "models/chess_cnn_best.pth"):
 
 
 if __name__ == "__main__":
-    if len(sys.argv) > 1:
-        main(image_path=sys.argv[1])
-    else:
-        main()
+    import argparse
+    
+    parser = argparse.ArgumentParser(description="Predict chess positions from images using trained classifier")
+    parser.add_argument("image", nargs="?", help="Path to image file (opens file dialog if not specified)")
+    parser.add_argument("-m", "--model", default="models/chess_cnn_best.pth",
+                        help="Path to model checkpoint (default: models/chess_cnn_best.pth)")
+    parser.add_argument("--resnet", action="store_true",
+                        help="Use ResNet-18 model (shortcut for --model models/chess_resnet18_best.pth)")
+    
+    args = parser.parse_args()
+    
+    # Handle --resnet shortcut
+    model_path = "models/chess_resnet18_best.pth" if args.resnet else args.model
+    
+    main(image_path=args.image, model_path=model_path)
