@@ -34,7 +34,8 @@ from PIL import Image
 REPO_ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(REPO_ROOT / "scripts"))
 
-from detect_board import detect_board_quad_grid_aware, warp_quad
+from detect_board import detect_board_quad_grid_aware, warp_quad, correct_board_orientation
+from extract import split_board_to_squares, draw_grid_overlay
 
 app = Flask(__name__)
 CORS(app)
@@ -227,15 +228,20 @@ def predict_board(img_bgr, model, debug=False):
     if debug:
         result["debug_images"] = {}
     
-    # Detect board
-    quad = detect_board_quad_grid_aware(img_bgr, crop_ratio=0.80)
+    # Detect board (use adaptive detection, no hardcoded crop_ratio)
+    quad = detect_board_quad_grid_aware(img_bgr)
     if quad is None:
         result["error"] = "Could not detect chess board"
         return result
     
-    # Warp board
-    warped = warp_quad(img_bgr, quad, out_size=512)
-    tile_size = 512 // 8
+    # Warp board - use 640 like review_overlays.py for consistency
+    warped = warp_quad(img_bgr, quad, out_size=640)
+    
+    # Correct orientation (ensure h1 is light square, a1 is dark)
+    warped = correct_board_orientation(warped)
+    
+    # Extract tiles using the SAME method as review_overlays.py (with autocrop)
+    squares, sq_size = split_board_to_squares(warped, do_autocrop=True)
     
     if debug:
         # Board detection overlay
@@ -243,7 +249,10 @@ def predict_board(img_bgr, model, debug=False):
         pts = quad.reshape((-1, 1, 2)).astype(np.int32)
         cv2.polylines(overlay, [pts], True, (0, 255, 0), 3)
         result["debug_images"]["detection"] = cv2.cvtColor(overlay, cv2.COLOR_BGR2RGB)
-        result["debug_images"]["warped"] = cv2.cvtColor(warped, cv2.COLOR_BGR2RGB)
+        
+        # Warped board with grid overlay (using the same function as review_overlays.py)
+        grid_overlay = draw_grid_overlay(warped, sq_size)
+        result["debug_images"]["warped"] = cv2.cvtColor(grid_overlay, cv2.COLOR_BGR2RGB)
     
     # Classify each tile
     board = [[None for _ in range(8)] for _ in range(8)]
@@ -251,9 +260,8 @@ def predict_board(img_bgr, model, debug=False):
     with torch.no_grad():
         for row in range(8):
             for col in range(8):
-                y1, y2 = row * tile_size, (row + 1) * tile_size
-                x1, x2 = col * tile_size, (col + 1) * tile_size
-                tile = warped[y1:y2, x1:x2]
+                # Use tiles from split_board_to_squares (same as review_overlays.py)
+                tile = squares[row][col]
                 
                 # Convert to PIL for transform
                 tile_rgb = cv2.cvtColor(tile, cv2.COLOR_BGR2RGB)
@@ -287,17 +295,37 @@ def predict_board(img_bgr, model, debug=False):
     fen = "/".join(fen_rows)
     
     if debug:
-        # Create overlay with predicted pieces
+        # Create overlay with predicted pieces and grid
         overlay_warped = warped.copy()
+        
+        # Draw grid
+        for i in range(9):
+            x = i * tile_size
+            cv2.line(overlay_warped, (x, 0), (x, 512), (0, 255, 0), 1)
+            y = i * tile_size
+            cv2.line(overlay_warped, (0, y), (512, y), (0, 255, 0), 1)
+        
+        # Draw predictions on each square
         for row in range(8):
             for col in range(8):
                 piece = board[row][col]
+                cx = col * tile_size + tile_size // 2
+                cy = row * tile_size + tile_size // 2
+                
                 if piece != "empty":
-                    cx = col * tile_size + tile_size // 2
-                    cy = row * tile_size + tile_size // 2
+                    # Draw piece unicode
                     cv2.putText(overlay_warped, PIECE_UNICODE[piece], 
-                               (cx - 20, cy + 15), cv2.FONT_HERSHEY_SIMPLEX, 
-                               1.5, (255, 0, 255), 3)
+                               (cx - 15, cy + 10), cv2.FONT_HERSHEY_SIMPLEX, 
+                               1.2, (255, 0, 255), 2)
+                
+                # Draw square label in corner
+                rank = 8 - row
+                file = files[col]
+                label = f"{file}{rank}"
+                cv2.putText(overlay_warped, label, 
+                           (col * tile_size + 2, row * tile_size + 12), 
+                           cv2.FONT_HERSHEY_SIMPLEX, 0.35, (255, 255, 0), 1)
+        
         result["debug_images"]["overlay"] = cv2.cvtColor(overlay_warped, cv2.COLOR_BGR2RGB)
     
     result["success"] = True
