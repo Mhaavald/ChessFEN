@@ -35,6 +35,7 @@ REPO_ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(REPO_ROOT / "scripts"))
 
 from detect_board import detect_board_quad_grid_aware, warp_quad
+from piece_detect import suggest_grid_adjustment, draw_piece_detection_overlay
 
 app = Flask(__name__)
 CORS(app)
@@ -518,6 +519,163 @@ def submit_feedback():
 def list_feedback():
     """List pending feedback items (admin endpoint)."""
     return jsonify(get_pending_feedback())
+
+
+@app.route('/api/align', methods=['POST'])
+def align_grid():
+    """
+    Analyze an image to detect the board, warp it, and show piece positions for grid alignment.
+    
+    This endpoint helps when automatic board detection produces misaligned grids.
+    It detects the board, warps it to a square, finds chess pieces, and shows 
+    how far off the grid alignment is.
+    
+    Request:
+        - image: base64 encoded original image (not warped)
+    
+    Response:
+        - success: boolean
+        - board_detected: boolean
+        - piece_found: boolean
+        - piece_center: [x, y] if found
+        - piece_square: [row, col] detected square
+        - square_name: string (e.g., "e4")
+        - offset: [dx, dy] suggested offset in pixels
+        - confidence: float 0-1
+        - overlay: base64 image with warped board, grid, and piece detection
+    """
+    print("[ALIGN] Received grid alignment request")
+    
+    # Get image
+    img_bgr = None
+    if request.json and 'image' in request.json:
+        img_base64 = request.json['image']
+        
+        # Handle data URL format
+        if ',' in img_base64 and img_base64.startswith('data:'):
+            img_base64 = img_base64.split(',', 1)[1]
+        
+        try:
+            img_data = base64.b64decode(img_base64)
+            nparr = np.frombuffer(img_data, np.uint8)
+            img_bgr = cv2.imdecode(nparr, cv2.IMREAD_COLOR)
+            
+            if img_bgr is None:
+                # Try PIL
+                pil_img = Image.open(BytesIO(img_data))
+                if pil_img.mode != 'RGB':
+                    pil_img = pil_img.convert('RGB')
+                img_rgb = np.array(pil_img)
+                img_bgr = cv2.cvtColor(img_rgb, cv2.COLOR_RGB2BGR)
+        except Exception as e:
+            print(f"[ALIGN] Decode error: {e}")
+            return jsonify({"success": False, "error": f"Decode error: {e}"}), 400
+    else:
+        return jsonify({"success": False, "error": "No image provided"}), 400
+    
+    if img_bgr is None:
+        return jsonify({"success": False, "error": "Invalid image"}), 400
+    
+    print(f"[ALIGN] Analyzing image {img_bgr.shape}")
+    
+    # Step 1: Detect the board
+    quad = detect_board_quad_grid_aware(img_bgr)
+    if quad is None:
+        print("[ALIGN] No board detected")
+        return jsonify({
+            "success": True,
+            "board_detected": False,
+            "piece_found": False,
+            "suggestion": "Could not detect a chess board in the image. Try a clearer photo with better lighting.",
+            "overlay": None
+        })
+    
+    # Step 2: Warp to square
+    warped = warp_quad(img_bgr, quad, out_size=640)
+    print(f"[ALIGN] Warped to {warped.shape}")
+    
+    # Step 3: Run piece detection on warped board
+    detection = suggest_grid_adjustment(warped)
+    
+    # Step 4: Create detailed overlay
+    h, w = warped.shape[:2]
+    sq_size = w // 8
+    overlay = warped.copy()
+    
+    # Draw grid lines
+    for i in range(9):
+        p = i * sq_size
+        cv2.line(overlay, (0, p), (w, p), (0, 255, 0), 2)
+        cv2.line(overlay, (p, 0), (p, h), (0, 255, 0), 2)
+    
+    # Draw square labels
+    files = "abcdefgh"
+    for row in range(8):
+        for col in range(8):
+            label = f"{files[col]}{8-row}"
+            x = col * sq_size + 5
+            y = row * sq_size + 18
+            cv2.putText(overlay, label, (x, y), cv2.FONT_HERSHEY_SIMPLEX, 0.4, (0, 255, 0), 1)
+    
+    # Build response
+    result = {
+        "success": True,
+        "board_detected": True,
+        "piece_found": detection["piece_found"],
+    }
+    
+    if detection["piece_found"]:
+        cx, cy = detection["piece_center"]
+        row, col = detection["piece_square"]
+        dx, dy = detection["offset"]
+        
+        # Draw expected center (green circle)
+        expected_cx = int((col + 0.5) * sq_size)
+        expected_cy = int((row + 0.5) * sq_size)
+        cv2.circle(overlay, (expected_cx, expected_cy), 12, (0, 255, 0), 3)
+        
+        # Draw actual center (red filled circle)
+        cv2.circle(overlay, (int(cx), int(cy)), 8, (0, 0, 255), -1)
+        
+        # Draw offset arrow
+        cv2.arrowedLine(overlay, (expected_cx, expected_cy), (int(cx), int(cy)), 
+                        (255, 0, 255), 3, tipLength=0.3)
+        
+        # Add text info
+        square_name = f"{files[col]}{8-row}"
+        info_text = f"Piece in {square_name}, offset: ({dx:.0f}, {dy:.0f})px"
+        cv2.putText(overlay, info_text, (10, h - 40), 
+                    cv2.FONT_HERSHEY_SIMPLEX, 0.7, (255, 255, 0), 2)
+        
+        if abs(dx) > 5 or abs(dy) > 5:
+            adjust_text = f"Adjust grid by ({-dx:.0f}, {-dy:.0f})px"
+            cv2.putText(overlay, adjust_text, (10, h - 15), 
+                        cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 165, 255), 2)
+            result["aligned"] = False
+            result["suggestion"] = f"Grid misaligned. The piece center is {abs(dx):.0f}px {'left' if dx < 0 else 'right'} and {abs(dy):.0f}px {'up' if dy < 0 else 'down'} from expected."
+        else:
+            cv2.putText(overlay, "Grid aligned OK", (10, h - 15), 
+                        cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 255, 0), 2)
+            result["aligned"] = True
+            result["suggestion"] = "Grid alignment looks good. Pieces are centered in their squares."
+        
+        result["piece_center"] = [round(cx, 1), round(cy, 1)]
+        result["piece_square"] = [row, col]
+        result["square_name"] = square_name
+        result["offset"] = [round(dx, 1), round(dy, 1)]
+        result["confidence"] = round(detection["confidence"], 2)
+    else:
+        cv2.putText(overlay, "No piece detected", (10, h - 15), 
+                    cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 0, 255), 2)
+        result["suggestion"] = "No piece detected. The board may be empty or pieces have low contrast."
+    
+    # Convert overlay to base64
+    overlay_rgb = cv2.cvtColor(overlay, cv2.COLOR_BGR2RGB)
+    overlay_b64 = image_to_base64(overlay_rgb)
+    result["overlay"] = overlay_b64
+    
+    print(f"[ALIGN] Result: board_detected=True, piece_found={detection['piece_found']}")
+    return jsonify(result)
 
 
 # ============================

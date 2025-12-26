@@ -121,7 +121,47 @@
                 <div class="card-body">
                     @if (!string.IsNullOrEmpty(errorMessage))
                     {
-                        <div class="alert alert-danger">@errorMessage</div>
+                        <div class="alert alert-danger">
+                            @errorMessage
+                            @if (errorMessage.Contains("detect") || errorMessage.Contains("board"))
+                            {
+                                <hr class="my-2" />
+                                <button class="btn btn-sm btn-warning" @onclick="CheckGridAlignment" disabled="@isCheckingAlignment">
+                                    @if (isCheckingAlignment)
+                                    {
+                                        <span class="spinner-border spinner-border-sm me-1"></span>
+                                    }
+                                    🔍 Check Grid Alignment
+                                </button>
+                                <small class="d-block mt-1 text-muted">Analyze piece positions to help align the grid</small>
+                            }
+                        </div>
+                    }
+                    
+                    @* Grid Alignment Result *@
+                    @if (alignmentResult != null)
+                    {
+                        <div class="alert @(alignmentResult.Aligned ? "alert-success" : "alert-warning") py-2 mb-3">
+                            <strong>Grid Alignment Check:</strong>
+                            <p class="mb-1">@alignmentResult.Suggestion</p>
+                            @if (alignmentResult.PieceFound)
+                            {
+                                <small>
+                                    Piece detected in @alignmentResult.SquareName
+                                    (confidence: @(alignmentResult.Confidence.ToString("P0")))
+                                    @if (alignmentResult.Offset != null && alignmentResult.Offset.Count >= 2)
+                                    {
+                                        <text>, offset: (@alignmentResult.Offset[0]:F0, @alignmentResult.Offset[1]:F0)px</text>
+                                    }
+                                </small>
+                            }
+                            @if (!string.IsNullOrEmpty(alignmentResult.Overlay))
+                            {
+                                <div class="mt-2">
+                                    <img src="data:image/png;base64,@alignmentResult.Overlay" class="img-fluid" style="max-width: 400px;" />
+                                </div>
+                            }
+                        </div>
                     }
                     
                     @if (!string.IsNullOrEmpty(resultFen))
@@ -168,6 +208,13 @@
                                     }
                                     🔎 Check if games exist
                                 </button>
+                                <button type="button" class="btn btn-outline-warning btn-sm" @onclick="CheckGridAlignment" disabled="@isCheckingAlignment">
+                                    @if (isCheckingAlignment)
+                                    {
+                                        <span class="spinner-border spinner-border-sm me-1"></span>
+                                    }
+                                    📐 Check Grid Alignment
+                                </button>
                             </div>
                             
                             <!-- Chess.com search results -->
@@ -179,6 +226,54 @@
                                         <div class="badge @(result.GamesFound ? "bg-success" : "bg-secondary") me-2 mb-1">
                                             @(result.Side == "w" ? "♔ White" : "♚ Black"): 
                                             @(result.GamesFound ? "✓ Games found" : "✗ No games")
+                                        </div>
+                                    }
+                                </div>
+                            }
+                            
+                            <!-- Grid Alignment Result -->
+                            @if (alignmentResult != null)
+                            {
+                                <div class="mt-3 p-3 border rounded @(alignmentResult.Aligned ? "border-success bg-success bg-opacity-10" : "border-warning bg-warning bg-opacity-10")">
+                                    <h6 class="mb-2">📐 Grid Alignment Analysis</h6>
+                                    
+                                    @if (!alignmentResult.BoardDetected)
+                                    {
+                                        <div class="alert alert-danger py-2 mb-2">
+                                            ❌ Could not detect chess board in image
+                                        </div>
+                                    }
+                                    else
+                                    {
+                                        <p class="mb-2">@alignmentResult.Suggestion</p>
+                                        
+                                        @if (alignmentResult.PieceFound)
+                                        {
+                                            <div class="small text-muted mb-2">
+                                                <strong>Detected piece:</strong> Square @alignmentResult.SquareName
+                                                @if (alignmentResult.Offset != null && alignmentResult.Offset.Count >= 2)
+                                                {
+                                                    <br />
+                                                    <strong>Offset from center:</strong> 
+                                                    <span>@(alignmentResult.Offset[0].ToString("F0"))px horizontal, @(alignmentResult.Offset[1].ToString("F0"))px vertical</span>
+                                                }
+                                            </div>
+                                            
+                                            <div class="small">
+                                                <span class="badge bg-success">🟢 Expected center (green circle)</span>
+                                                <span class="badge bg-danger">🔴 Actual piece center (red dot)</span>
+                                                <span class="badge bg-info">➜ Offset direction (arrow)</span>
+                                            </div>
+                                        }
+                                    }
+                                    
+                                    @if (!string.IsNullOrEmpty(alignmentResult.Overlay))
+                                    {
+                                        <div class="mt-2 text-center">
+                                            <img src="data:image/png;base64,@alignmentResult.Overlay" 
+                                                 class="img-fluid border" 
+                                                 style="max-width: 500px;" 
+                                                 alt="Grid alignment overlay" />
                                         </div>
                                     }
                                 </div>
@@ -514,6 +609,10 @@
     private bool isCheckingGames = false;
     private List<ChessComSearchResultItem> chessComSearchResults = new();
     
+    // Grid alignment check
+    private bool isCheckingAlignment = false;
+    private GridAlignmentResult? alignmentResult;
+    
     private Dictionary<string, string> pieceOptions = new()
     {
         { "empty", "·" },
@@ -615,6 +714,7 @@
         fenValidation = null;
         corrections.Clear();
         chessComSearchResults.Clear();
+        alignmentResult = null;
         InitializeBoard();
     }
     
@@ -985,6 +1085,52 @@
         }
     }
 
+    private async Task CheckGridAlignment()
+    {
+        if (string.IsNullOrEmpty(imageBase64)) return;
+        
+        isCheckingAlignment = true;
+        alignmentResult = null;
+        StateHasChanged();
+        
+        try
+        {
+            var payload = new { image = imageBase64 };
+            var json = JsonSerializer.Serialize(payload);
+            var content = new StringContent(json, System.Text.Encoding.UTF8, "application/json");
+            
+            var response = await Http.PostAsync("/api/chess/align", content);
+            if (response.IsSuccessStatusCode)
+            {
+                var responseJson = await response.Content.ReadAsStringAsync();
+                alignmentResult = JsonSerializer.Deserialize<GridAlignmentResult>(responseJson, 
+                    new JsonSerializerOptions { PropertyNameCaseInsensitive = true });
+            }
+            else
+            {
+                alignmentResult = new GridAlignmentResult
+                {
+                    Success = false,
+                    Suggestion = "Failed to analyze image"
+                };
+            }
+        }
+        catch (Exception ex)
+        {
+            Log($"Error checking alignment: {ex.Message}");
+            alignmentResult = new GridAlignmentResult
+            {
+                Success = false,
+                Suggestion = $"Error: {ex.Message}"
+            };
+        }
+        finally
+        {
+            isCheckingAlignment = false;
+            StateHasChanged();
+        }
+    }
+
     private string InferCastlingRights()
     {
         // Check if kings and rooks are on starting squares
@@ -1298,6 +1444,23 @@
         public string Side { get; set; } = "";
         public bool GamesFound { get; set; }
         public string? Message { get; set; }
+    }
+    
+    // Grid alignment models
+    public class GridAlignmentResult
+    {
+        public bool Success { get; set; }
+        public bool BoardDetected { get; set; }
+        public bool PieceFound { get; set; }
+        public List<double>? PieceCenter { get; set; }
+        public List<int>? PieceSquare { get; set; }
+        public string? SquareName { get; set; }
+        public List<double>? Offset { get; set; }
+        public double Confidence { get; set; }
+        public bool Aligned { get; set; }
+        public string? Suggestion { get; set; }
+        public string? Overlay { get; set; }
+        public string? Error { get; set; }
     }
 }
 

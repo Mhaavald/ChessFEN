@@ -13,6 +13,9 @@ ENV/
 # Data & models (don’t commit these)
 data/
 models/
+debug_out/
+output_tiles/
+tmp/
 *.pt
 *.onnx
 

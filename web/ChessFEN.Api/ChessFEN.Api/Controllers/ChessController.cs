@@ -355,6 +355,50 @@ public class ChessController : ControllerBase
             return StatusCode(503, new { status = "unhealthy", error = ex.Message });
         }
     }
+
+    /// <summary>
+    /// Analyze a warped board image to detect piece positions and suggest grid adjustments.
+    /// Used when automatic board detection produces misaligned grids.
+    /// </summary>
+    [HttpPost("align")]
+    public async Task<ActionResult<GridAlignmentResult>> AlignGrid([FromBody] Dictionary<string, string> body)
+    {
+        if (!body.TryGetValue("image", out var imageBase64) || string.IsNullOrEmpty(imageBase64))
+        {
+            return BadRequest(new GridAlignmentResult 
+            { 
+                Success = false, 
+                Error = "No image provided" 
+            });
+        }
+
+        try
+        {
+            var client = _httpClientFactory.CreateClient("InferenceService");
+            
+            var payload = JsonSerializer.Serialize(new { image = imageBase64 });
+            var content = new StringContent(payload, Encoding.UTF8, "application/json");
+
+            var response = await client.PostAsync("/api/align", content);
+            var json = await response.Content.ReadAsStringAsync();
+
+            var result = JsonSerializer.Deserialize<GridAlignmentResult>(json, new JsonSerializerOptions
+            {
+                PropertyNameCaseInsensitive = true
+            });
+
+            return Ok(result);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Error calling alignment service");
+            return StatusCode(500, new GridAlignmentResult 
+            { 
+                Success = false, 
+                Error = "Alignment service error: " + ex.Message 
+            });
+        }
+    }
 }
 
 /// <summary>
@@ -366,5 +410,24 @@ public class ChessComSearchResult
     public bool GamesFound { get; set; }
     public string? SearchUrl { get; set; }
     public string? Message { get; set; }
+    public string? Error { get; set; }
+}
+
+/// <summary>
+/// Result from grid alignment analysis
+/// </summary>
+public class GridAlignmentResult
+{
+    public bool Success { get; set; }
+    public bool BoardDetected { get; set; }
+    public bool PieceFound { get; set; }
+    public List<double>? PieceCenter { get; set; }
+    public List<int>? PieceSquare { get; set; }
+    public string? SquareName { get; set; }
+    public List<double>? Offset { get; set; }
+    public double Confidence { get; set; }
+    public bool Aligned { get; set; }
+    public string? Suggestion { get; set; }
+    public string? Overlay { get; set; }
     public string? Error { get; set; }
 }
