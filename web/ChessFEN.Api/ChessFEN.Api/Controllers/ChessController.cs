@@ -29,12 +29,14 @@ public class ChessController : ControllerBase
     /// <param name="image">Image file (JPEG/PNG)</param>
     /// <param name="debug">Include debug images in response</param>
     /// <param name="model">Model name to use (optional)</param>
+    /// <param name="skipDetection">Skip board detection, treat entire image as board</param>
     [HttpPost("predict")]
     [Consumes("multipart/form-data")]
     public async Task<ActionResult<PredictionResponse>> Predict(
         IFormFile image,
         [FromQuery] bool debug = false,
-        [FromQuery] string? model = null)
+        [FromQuery] string? model = null,
+        [FromQuery] bool skipDetection = false)
     {
         if (image == null || image.Length == 0)
         {
@@ -53,6 +55,7 @@ public class ChessController : ControllerBase
             var queryParams = new List<string>();
             if (debug) queryParams.Add("debug=true");
             if (!string.IsNullOrEmpty(model)) queryParams.Add($"model={model}");
+            if (skipDetection) queryParams.Add("skip_detection=true");
             var query = queryParams.Count > 0 ? "?" + string.Join("&", queryParams) : "";
 
             // Send image to Python service
@@ -89,7 +92,8 @@ public class ChessController : ControllerBase
     public async Task<ActionResult<PredictionResponse>> PredictBase64(
         [FromBody] Dictionary<string, string> body,
         [FromQuery] bool debug = false,
-        [FromQuery] string? model = null)
+        [FromQuery] string? model = null,
+        [FromQuery] bool skipDetection = false)
     {
         if (!body.TryGetValue("image", out var imageBase64) || string.IsNullOrEmpty(imageBase64))
         {
@@ -107,6 +111,7 @@ public class ChessController : ControllerBase
             var queryParams = new List<string>();
             if (debug) queryParams.Add("debug=true");
             if (!string.IsNullOrEmpty(model)) queryParams.Add($"model={model}");
+            if (skipDetection) queryParams.Add("skip_detection=true");
             var query = queryParams.Count > 0 ? "?" + string.Join("&", queryParams) : "";
 
             var payload = JsonSerializer.Serialize(new { image = imageBase64 });
@@ -361,9 +366,22 @@ public class ChessController : ControllerBase
     /// Used when automatic board detection produces misaligned grids.
     /// </summary>
     [HttpPost("align")]
-    public async Task<ActionResult<GridAlignmentResult>> AlignGrid([FromBody] Dictionary<string, string> body)
+    public async Task<ActionResult<GridAlignmentResult>> AlignGrid([FromBody] JsonElement body)
     {
-        if (!body.TryGetValue("image", out var imageBase64) || string.IsNullOrEmpty(imageBase64))
+        string? imageBase64 = null;
+        bool skipDetection = false;
+        
+        if (body.TryGetProperty("image", out var imageElement))
+        {
+            imageBase64 = imageElement.GetString();
+        }
+        
+        if (body.TryGetProperty("skip_detection", out var skipElement))
+        {
+            skipDetection = skipElement.GetBoolean();
+        }
+        
+        if (string.IsNullOrEmpty(imageBase64))
         {
             return BadRequest(new GridAlignmentResult 
             { 
@@ -376,7 +394,7 @@ public class ChessController : ControllerBase
         {
             var client = _httpClientFactory.CreateClient("InferenceService");
             
-            var payload = JsonSerializer.Serialize(new { image = imageBase64 });
+            var payload = JsonSerializer.Serialize(new { image = imageBase64, skip_detection = skipDetection });
             var content = new StringContent(payload, Encoding.UTF8, "application/json");
 
             var response = await client.PostAsync("/api/align", content);

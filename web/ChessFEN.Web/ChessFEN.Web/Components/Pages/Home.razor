@@ -25,10 +25,12 @@
                         <InputFile OnChange="HandleFileSelected" class="form-control" accept="image/*" />
                     </div>
                     
-                    <!-- Camera Capture (mobile) -->
+                    <!-- Camera Capture with overlay guide -->
                     <div class="mb-3">
                         <label class="form-label">Or capture from camera:</label>
-                        <InputFile OnChange="HandleFileSelected" class="form-control" accept="image/*" capture="environment" />
+                        <button type="button" class="btn btn-outline-secondary w-100" @onclick="OpenCameraCapture">
+                            📸 Open Camera with Guide
+                        </button>
                     </div>
                     
                     <!-- Preview -->
@@ -39,10 +41,17 @@
                             {
                                 <img src="@imagePreview" alt="Preview" class="img-fluid" style="max-height: 300px;" />
                             }
+                            else if (selectedFile != null)
+                            {
+                                <div class="alert alert-info">
+                                    📁 File selected: @selectedFile.Name (@(selectedFile.Size / 1024) KB)
+                                    <br/><small>Click "Analyze Board" to process</small>
+                                </div>
+                            }
                             else
                             {
                                 <div class="alert alert-info">
-                                    📁 File selected: @(selectedFile?.Name ?? "Unknown") (@(selectedFile?.Size / 1024) KB)
+                                    📷 Camera image captured
                                     <br/><small>Click "Analyze Board" to process</small>
                                 </div>
                             }
@@ -63,14 +72,37 @@
                         </div>
                     }
                     
+                    <!-- Skip Detection Option -->
+                    <div class="form-check mb-3">
+                        <input class="form-check-input" type="checkbox" id="skipDetection" 
+                               checked="@skipDetection" 
+                               @onchange="@((ChangeEventArgs e) => { skipDetection = (bool)(e.Value ?? false); StateHasChanged(); })">
+                        <label class="form-check-label" for="skipDetection">
+                            📐 Image is board only (skip detection)
+                        </label>
+                        <div class="form-text small">Use this when the image is a cropped chess board with no borders</div>
+                    </div>
+                    
                     <!-- Predict Button -->
-                    <button type="button" class="btn btn-primary btn-lg w-100" @onclick="OnAnalyzeClick" disabled="@buttonDisabled">
-                        @if (isLoading)
-                        {
+                    @if (isLoading)
+                    {
+                        <button type="button" class="btn btn-primary btn-lg w-100" disabled>
                             <span class="spinner-border spinner-border-sm me-2"></span>
-                        }
-                        🔍 Analyze Board
-                    </button>
+                            🔍 Analyzing...
+                        </button>
+                    }
+                    else if (!hasImage)
+                    {
+                        <button type="button" class="btn btn-primary btn-lg w-100" disabled>
+                            🔍 Analyze Board
+                        </button>
+                    }
+                    else
+                    {
+                        <button type="button" class="btn btn-primary btn-lg w-100" @onclick="OnAnalyzeClick">
+                            🔍 Analyze Board
+                        </button>
+                    }
                     
                     <!-- Test Button -->
                     <button type="button" class="btn btn-warning mt-2 w-100" @onclick="TestClick">
@@ -440,6 +472,37 @@
     </div>
 </div>
 
+<!-- Camera Modal (outside container for proper z-index) -->
+@if (showCameraModal)
+{
+    <div class="camera-modal-overlay" @onclick="CloseCameraCapture">
+        <div class="camera-modal" @onclick:stopPropagation="true">
+            <div class="camera-header">
+                <h5>📸 Capture Chess Board</h5>
+                <button type="button" class="btn-close" @onclick="CloseCameraCapture"></button>
+            </div>
+            <div class="camera-body">
+                <div id="cameraStatus" class="alert alert-info mb-2">Initializing camera...</div>
+                <div class="camera-container">
+                    <video id="cameraVideo" autoplay playsinline muted></video>
+                    <div class="camera-guide">
+                        <div class="guide-square"></div>
+                        <div class="guide-text">Align board here</div>
+                    </div>
+                </div>
+                <div class="camera-controls mt-3">
+                    <button type="button" class="btn btn-success btn-lg capture-btn" id="captureBtn" @onclick="CaptureAndProcess">
+                        📷 Capture
+                    </button>
+                    <button type="button" class="btn btn-secondary" onclick="switchCamera()">
+                        🔄 Switch Camera
+                    </button>
+                </div>
+            </div>
+        </div>
+    </div>
+}
+
 <style>
     .chess-board {
         border-collapse: collapse;
@@ -500,9 +563,483 @@
         background: #cce5ff;
         box-shadow: 0 0 0 2px rgba(0,123,255,0.25);
     }
+    
+    /* Camera modal styles */
+    .camera-modal-overlay {
+        position: fixed;
+        top: 0;
+        left: 0;
+        width: 100%;
+        height: 100%;
+        background: rgba(0, 0, 0, 0.85);
+        z-index: 1050;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+    }
+    .camera-modal {
+        background: #1a1a1a;
+        border-radius: 12px;
+        max-width: 95vw;
+        max-height: 95vh;
+        overflow: hidden;
+    }
+    .camera-header {
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        padding: 12px 16px;
+        background: #2a2a2a;
+        color: white;
+    }
+    .camera-header h5 {
+        margin: 0;
+    }
+    .camera-header .btn-close {
+        filter: invert(1);
+    }
+    .camera-body {
+        padding: 16px;
+        text-align: center;
+    }
+    .camera-container {
+        position: relative;
+        display: inline-block;
+    }
+    .camera-container video {
+        max-width: 100%;
+        max-height: 70vh;
+        border-radius: 8px;
+    }
+    .camera-guide {
+        position: absolute;
+        top: 0;
+        left: 0;
+        width: 100%;
+        height: 100%;
+        pointer-events: none;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        flex-direction: column;
+    }
+    .guide-square {
+        width: 80%;
+        aspect-ratio: 1;
+        max-width: 80%;
+        max-height: 80%;
+        border: 3px solid #00ff00;
+        border-radius: 4px;
+        box-shadow: 0 0 0 9999px rgba(0, 0, 0, 0.3);
+    }
+    .guide-text {
+        color: #00ff00;
+        font-size: 14px;
+        margin-top: 8px;
+        text-shadow: 0 0 4px black;
+    }
+    .camera-controls {
+        display: flex;
+        gap: 12px;
+        justify-content: center;
+        flex-wrap: wrap;
+    }
+    .capture-btn {
+        opacity: 0.5;
+        pointer-events: none;
+    }
 </style>
 
 <script>
+    // Camera capture functionality
+    let cameraStream = null;
+    let facingMode = 'environment'; // Start with back camera
+    let cameraReady = false;
+    
+    function updateCameraStatus(msg, type) {
+        const el = document.getElementById('cameraStatus');
+        if (el) {
+            el.textContent = msg;
+            el.className = 'alert alert-' + (type || 'info') + ' mb-2';
+        }
+        console.log('[Camera]', msg);
+    }
+    
+    function setCaptureEnabled(enabled) {
+        const btn = document.getElementById('captureBtn');
+        if (btn) {
+            // Use class for visual state but don't set disabled attribute
+            // This allows Blazor onclick to still work
+            if (enabled) {
+                btn.classList.remove('disabled');
+                btn.style.opacity = '1';
+                btn.style.pointerEvents = 'auto';
+            } else {
+                btn.classList.add('disabled');
+                btn.style.opacity = '0.5';
+                btn.style.pointerEvents = 'none';
+            }
+        }
+    }
+    
+    window.startCamera = async function() {
+        const video = document.getElementById('cameraVideo');
+        if (!video) {
+            updateCameraStatus('Video element not found', 'danger');
+            return { success: false, error: 'Video element not found' };
+        }
+        
+        cameraReady = false;
+        setCaptureEnabled(false);
+        updateCameraStatus('Requesting camera access...', 'info');
+        
+        try {
+            // Stop any existing stream
+            if (cameraStream) {
+                cameraStream.getTracks().forEach(t => t.stop());
+            }
+            
+            // Check if mediaDevices is available
+            if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
+                throw new Error('Camera API not supported. Make sure you are using HTTPS.');
+            }
+            
+            // Request camera - try simple constraints first for better iOS compatibility
+            let constraints = { video: true, audio: false };
+            
+            // Try to get back camera on mobile
+            try {
+                constraints = {
+                    video: { facingMode: facingMode },
+                    audio: false
+                };
+            } catch (e) {
+                console.log('Using basic constraints');
+            }
+            
+            updateCameraStatus('Opening camera...', 'info');
+            cameraStream = await navigator.mediaDevices.getUserMedia(constraints);
+            
+            updateCameraStatus('Camera opened, loading video...', 'info');
+            video.srcObject = cameraStream;
+            
+            // Wait for video to be ready (important for iOS)
+            await new Promise((resolve, reject) => {
+                const timeoutId = setTimeout(() => reject(new Error('Video load timeout')), 8000);
+                
+                video.onloadedmetadata = () => {
+                    clearTimeout(timeoutId);
+                    updateCameraStatus('Video metadata loaded, starting playback...', 'info');
+                    video.play()
+                        .then(resolve)
+                        .catch(e => {
+                            // iOS may block autoplay - try muted
+                            video.muted = true;
+                            video.play().then(resolve).catch(reject);
+                        });
+                };
+                video.onerror = (e) => {
+                    clearTimeout(timeoutId);
+                    reject(e);
+                };
+            });
+            
+            // Additional wait for iOS to stabilize
+            await new Promise(r => setTimeout(r, 500));
+            
+            cameraReady = true;
+            setCaptureEnabled(true);
+            updateCameraStatus('Camera ready! Align the board and tap Capture.', 'success');
+            console.log('Camera ready:', video.videoWidth, 'x', video.videoHeight);
+            return { success: true };
+        } catch (e) {
+            console.error('Camera error:', e);
+            let errMsg = e.message || 'Unknown error';
+            if (e.name === 'NotAllowedError') {
+                errMsg = 'Camera permission denied. Please allow camera access in your browser settings.';
+            } else if (e.name === 'NotFoundError') {
+                errMsg = 'No camera found on this device.';
+            } else if (e.name === 'NotReadableError') {
+                errMsg = 'Camera is in use by another app.';
+            }
+            updateCameraStatus(errMsg, 'danger');
+            return { success: false, error: errMsg };
+        }
+    };
+    
+    window.stopCamera = function() {
+        cameraReady = false;
+        if (cameraStream) {
+            cameraStream.getTracks().forEach(t => t.stop());
+            cameraStream = null;
+        }
+        const video = document.getElementById('cameraVideo');
+        if (video) {
+            video.srcObject = null;
+        }
+    };
+    
+    window.switchCamera = async function() {
+        facingMode = facingMode === 'environment' ? 'user' : 'environment';
+        updateCameraStatus('Switching camera...', 'info');
+        await window.startCamera();
+    };
+    
+    // Enhance contrast - makes whites whiter and blacks blacker
+    function enhanceContrast(ctx, width, height) {
+        const imageData = ctx.getImageData(0, 0, width, height);
+        const data = imageData.data;
+        
+        // Step 1: Find min/max for auto-levels
+        let minR = 255, maxR = 0;
+        let minG = 255, maxG = 0;
+        let minB = 255, maxB = 0;
+        
+        for (let i = 0; i < data.length; i += 4) {
+            minR = Math.min(minR, data[i]);
+            maxR = Math.max(maxR, data[i]);
+            minG = Math.min(minG, data[i + 1]);
+            maxG = Math.max(maxG, data[i + 1]);
+            minB = Math.min(minB, data[i + 2]);
+            maxB = Math.max(maxB, data[i + 2]);
+        }
+        
+        // Apply auto-levels (stretch histogram)
+        const rangeR = maxR - minR || 1;
+        const rangeG = maxG - minG || 1;
+        const rangeB = maxB - minB || 1;
+        
+        for (let i = 0; i < data.length; i += 4) {
+            data[i] = Math.round(((data[i] - minR) / rangeR) * 255);
+            data[i + 1] = Math.round(((data[i + 1] - minG) / rangeG) * 255);
+            data[i + 2] = Math.round(((data[i + 2] - minB) / rangeB) * 255);
+        }
+        
+        // Step 2: Increase contrast (factor 1.3)
+        const contrastFactor = 1.3;
+        for (let i = 0; i < data.length; i += 4) {
+            data[i] = Math.min(255, Math.max(0, 128 + (data[i] - 128) * contrastFactor));
+            data[i + 1] = Math.min(255, Math.max(0, 128 + (data[i + 1] - 128) * contrastFactor));
+            data[i + 2] = Math.min(255, Math.max(0, 128 + (data[i + 2] - 128) * contrastFactor));
+        }
+        
+        // Step 3: Enhance blacks (make dark areas darker)
+        const blackStrength = 0.15;
+        for (let i = 0; i < data.length; i += 4) {
+            for (let c = 0; c < 3; c++) {
+                const v = data[i + c];
+                const factor = (255 - v) / 255 * (v / 255) * ((255 - v) / 255);
+                data[i + c] = Math.max(0, Math.round(v - blackStrength * (255 - v) * factor));
+            }
+        }
+        
+        // Step 4: Reduce whites slightly (prevent blown highlights)
+        const whiteStrength = 0.1;
+        for (let i = 0; i < data.length; i += 4) {
+            for (let c = 0; c < 3; c++) {
+                const v = data[i + c];
+                const factor = (v / 255) * (v / 255);
+                data[i + c] = Math.max(0, Math.round(v - whiteStrength * v * factor));
+            }
+        }
+        
+        ctx.putImageData(imageData, 0, 0);
+    }
+    
+    // Apply sharpening using unsharp mask
+    function sharpenImage(ctx, width, height, amount = 0.5) {
+        const imageData = ctx.getImageData(0, 0, width, height);
+        const data = imageData.data;
+        const original = new Uint8ClampedArray(data);
+        
+        // Simple 3x3 sharpen kernel effect via unsharp mask
+        // We approximate blur by averaging neighbors
+        for (let y = 1; y < height - 1; y++) {
+            for (let x = 1; x < width - 1; x++) {
+                const idx = (y * width + x) * 4;
+                
+                for (let c = 0; c < 3; c++) {
+                    // Get neighboring pixels for blur approximation
+                    let blur = 0;
+                    let count = 0;
+                    for (let dy = -1; dy <= 1; dy++) {
+                        for (let dx = -1; dx <= 1; dx++) {
+                            const nidx = ((y + dy) * width + (x + dx)) * 4;
+                            blur += original[nidx + c];
+                            count++;
+                        }
+                    }
+                    blur /= count;
+                    
+                    // Unsharp mask: original + amount * (original - blur)
+                    const orig = original[idx + c];
+                    const sharpened = orig + amount * (orig - blur);
+                    data[idx + c] = Math.max(0, Math.min(255, Math.round(sharpened)));
+                }
+            }
+        }
+        
+        ctx.putImageData(imageData, 0, 0);
+    }
+    
+    // Save image - uses Share API on mobile (allows Save to Photos), download on desktop
+    async function saveImage(base64Data, filename) {
+        const blob = await fetch('data:image/jpeg;base64,' + base64Data).then(r => r.blob());
+        const file = new File([blob], filename, { type: 'image/jpeg' });
+        
+        // Try Web Share API first (works on iOS Safari - allows Save to Photos)
+        if (navigator.canShare && navigator.canShare({ files: [file] })) {
+            try {
+                await navigator.share({
+                    files: [file],
+                    title: 'Chess Board Capture',
+                    text: 'Captured chess board image'
+                });
+                console.log('Image shared successfully');
+                return;
+            } catch (e) {
+                if (e.name !== 'AbortError') {
+                    console.log('Share failed, falling back to download:', e);
+                }
+            }
+        }
+        
+        // Fallback: download link
+        const link = document.createElement('a');
+        link.href = URL.createObjectURL(blob);
+        link.download = filename;
+        document.body.appendChild(link);
+        link.click();
+        document.body.removeChild(link);
+        URL.revokeObjectURL(link.href);
+    }
+    
+    window.captureFrame = async function() {
+        const video = document.getElementById('cameraVideo');
+        
+        // Check if camera is ready
+        if (!video || !cameraReady || video.readyState < 2) {
+            // Try to wait a bit for camera
+            if (video && video.srcObject) {
+                updateCameraStatus('Waiting for camera...', 'warning');
+                await new Promise(r => setTimeout(r, 500));
+                if (!video.videoWidth || video.readyState < 2) {
+                    updateCameraStatus('Camera not ready yet. Please wait.', 'warning');
+                    return;
+                }
+            } else {
+                updateCameraStatus('Camera not available. Close and reopen.', 'danger');
+                return;
+            }
+        }
+        
+        updateCameraStatus('Capturing image...', 'info');
+        
+        // Calculate the square crop region (center square)
+        const vw = video.videoWidth;
+        const vh = video.videoHeight;
+        console.log('Capturing from video:', vw, 'x', vh);
+        
+        const size = Math.min(vw, vh) * 0.8; // 80% of the smaller dimension
+        const sx = (vw - size) / 2;
+        const sy = (vh - size) / 2;
+        
+        // Create canvas for cropped square image
+        const canvas = document.createElement('canvas');
+        canvas.width = 512;  // Output size
+        canvas.height = 512;
+        const ctx = canvas.getContext('2d');
+        
+        // Draw the cropped region
+        ctx.drawImage(video, sx, sy, size, size, 0, 0, 512, 512);
+        
+        // Full preprocessing: contrast, black/white adjustment, sharpen
+        enhanceContrast(ctx, 512, 512);
+        sharpenImage(ctx, 512, 512, 0.5);
+        
+        // Get base64 image
+        const base64 = canvas.toDataURL('image/jpeg', 0.92).split(',')[1];
+        
+        // Save image to client with timestamp
+        const timestamp = new Date().toISOString().replace(/[:.]/g, '-').substring(0, 19);
+        await saveImage(base64, `chess-capture-${timestamp}.jpg`);
+        
+        // Stop camera
+        window.stopCamera();
+        
+        // Store in window for Blazor to retrieve
+        window.capturedImageBase64 = base64;
+        
+        // Call Blazor to handle the captured image
+        try {
+            await DotNet.invokeMethodAsync('ChessFEN.Web', 'HandleCameraCapture', base64);
+        } catch (e) {
+            console.error('Error calling HandleCameraCapture:', e);
+        }
+    };
+    
+    // Capture frame and return base64 directly (called from Blazor)
+    window.captureFrameAndReturn = async function() {
+        const video = document.getElementById('cameraVideo');
+        
+        // Check if camera is ready
+        if (!video || !cameraReady || video.readyState < 2) {
+            if (video && video.srcObject) {
+                await new Promise(r => setTimeout(r, 500));
+                if (!video.videoWidth || video.readyState < 2) {
+                    console.error('Camera not ready');
+                    return null;
+                }
+            } else {
+                console.error('Camera not available');
+                return null;
+            }
+        }
+        
+        updateCameraStatus('Capturing image...', 'info');
+        
+        // Calculate the square crop region (center square)
+        const vw = video.videoWidth;
+        const vh = video.videoHeight;
+        console.log('Capturing from video:', vw, 'x', vh);
+        
+        const size = Math.min(vw, vh) * 0.8;
+        const sx = (vw - size) / 2;
+        const sy = (vh - size) / 2;
+        
+        // Create canvas for cropped square image
+        const canvas = document.createElement('canvas');
+        canvas.width = 512;
+        canvas.height = 512;
+        const ctx = canvas.getContext('2d');
+        
+        // Draw the cropped region
+        ctx.drawImage(video, sx, sy, size, size, 0, 0, 512, 512);
+        
+        // Full preprocessing: contrast, black/white adjustment, sharpen
+        enhanceContrast(ctx, 512, 512);
+        sharpenImage(ctx, 512, 512, 0.5);
+        
+        // Get base64 image
+        const base64 = canvas.toDataURL('image/jpeg', 0.92).split(',')[1];
+        
+        // Stop camera first
+        window.stopCamera();
+        
+        // Save image to client (don't await - let it happen in background)
+        const timestamp = new Date().toISOString().replace(/[:.]/g, '-').substring(0, 19);
+        saveImage(base64, `chess-capture-${timestamp}.jpg`);
+        
+        return base64;
+    };
+    
+    // Function to get captured image (called from Blazor)
+    window.getCapturedImage = function() {
+        const img = window.capturedImageBase64;
+        window.capturedImageBase64 = null;
+        return img;
+    };
+    
     // Direct copy function for iOS - must be called from onclick directly (not Blazor)
     function copyFenFromInput(inputId, button) {
         const input = document.getElementById(inputId);
@@ -589,6 +1126,7 @@
     private string? errorMessage;
     private bool isLoading = false;
     private bool debugMode = false;
+    private bool skipDetection = false;
     private string selectedModel = "";
     
     private string[,] boardPieces = new string[8, 8];
@@ -604,6 +1142,10 @@
     private bool buttonDisabled => isLoading || !hasImage;
     
     private int testCounter = 0;
+    
+    // Camera capture
+    private bool showCameraModal = false;
+    private static Home? _instance;
     
     // Chess.com game search
     private bool isCheckingGames = false;
@@ -629,6 +1171,114 @@
         debugLogs.Add(logMessage);
         Logger.LogInformation(logMessage);
         Console.WriteLine(logMessage);
+    }
+    
+    // Camera capture methods
+    private async Task OpenCameraCapture()
+    {
+        Log("Opening camera capture...");
+        _instance = this;
+        showCameraModal = true;
+        StateHasChanged();
+        
+        // Give the modal time to render, then start camera
+        await Task.Delay(100);
+        try
+        {
+            await JSRuntime.InvokeVoidAsync("startCamera");
+        }
+        catch (Exception ex)
+        {
+            Log($"Camera error: {ex.Message}");
+            errorMessage = "Could not access camera. Please check permissions.";
+            showCameraModal = false;
+            StateHasChanged();
+        }
+    }
+    
+    private async Task CloseCameraCapture()
+    {
+        Log("Closing camera capture...");
+        try
+        {
+            await JSRuntime.InvokeVoidAsync("stopCamera");
+        }
+        catch { }
+        
+        // Check if there's a captured image waiting
+        try
+        {
+            var capturedBase64 = await JSRuntime.InvokeAsync<string>("getCapturedImage");
+            if (!string.IsNullOrEmpty(capturedBase64))
+            {
+                Log($"Retrieved captured image via getCapturedImage, length: {capturedBase64.Length}");
+                await ProcessCameraCapture(capturedBase64);
+                return;
+            }
+        }
+        catch (Exception ex)
+        {
+            Log($"Error getting captured image: {ex.Message}");
+        }
+        
+        showCameraModal = false;
+        StateHasChanged();
+    }
+    
+    private async Task CaptureAndProcess()
+    {
+        Log("CaptureAndProcess called from Blazor button");
+        try
+        {
+            // Call JS to capture and get the base64 directly
+            var base64 = await JSRuntime.InvokeAsync<string>("captureFrameAndReturn");
+            if (!string.IsNullOrEmpty(base64))
+            {
+                Log($"Got captured image, length: {base64.Length}");
+                await ProcessCameraCapture(base64);
+            }
+            else
+            {
+                Log("captureFrameAndReturn returned empty");
+            }
+        }
+        catch (Exception ex)
+        {
+            Log($"Error in CaptureAndProcess: {ex.Message}");
+        }
+    }
+    
+    [JSInvokable]
+    public static async Task HandleCameraCapture(string base64Image)
+    {
+        if (_instance == null) return;
+        await _instance.ProcessCameraCapture(base64Image);
+    }
+    
+    private async Task ProcessCameraCapture(string base64Image)
+    {
+        Log($"Received camera capture, base64 length: {base64Image.Length}");
+        
+        showCameraModal = false;
+        
+        // Clean the base64 string (remove any whitespace/newlines)
+        imageBase64 = base64Image.Replace("\n", "").Replace("\r", "").Replace(" ", "");
+        imagePreview = $"data:image/jpeg;base64,{imageBase64}";
+        hasImage = true;
+        selectedFile = null; // Clear file reference since we have base64 directly
+        
+        Log($"Preview set, length: {imagePreview.Length}, starts with: {imagePreview.Substring(0, Math.Min(50, imagePreview.Length))}");
+        
+        // Clear previous results
+        resultFen = null;
+        errorMessage = null;
+        fenValidation = null;
+        corrections.Clear();
+        chessComSearchResults.Clear();
+        alignmentResult = null;
+        InitializeBoard();
+        
+        await InvokeAsync(StateHasChanged);
     }
     
     private async Task OnAnalyzeClick()
@@ -706,7 +1356,7 @@
         selectedFile = file;
         imagePreview = "pending"; // Signal that we have a file but haven't loaded preview
         hasImage = true;
-        Log($"File selected, ready for analysis");
+        Log($"File selected, ready for analysis. hasImage={hasImage}");
         
         // Clear previous results
         resultFen = null;
@@ -716,6 +1366,9 @@
         chessComSearchResults.Clear();
         alignmentResult = null;
         InitializeBoard();
+        
+        // Force UI update (needed for iOS)
+        await InvokeAsync(StateHasChanged);
     }
     
     private IBrowserFile? selectedFile;
@@ -725,9 +1378,10 @@
     {
         Log("=== PredictFen STARTED ===");
         
-        if (selectedFile == null)
+        // Check if we have an image (either from file or camera capture)
+        if (selectedFile == null && string.IsNullOrEmpty(imageBase64))
         {
-            Log("ERROR: No file selected");
+            Log("ERROR: No image available");
             return;
         }
         
@@ -737,21 +1391,45 @@
         
         try
         {
-            // Read file now (only when needed for API call)
-            Log($"Reading file: {selectedFile.Name}, Size: {selectedFile.Size}");
+            string base64Data;
             
-            // Read all bytes properly using MemoryStream
-            using var memoryStream = new MemoryStream();
-            await selectedFile.OpenReadStream(maxAllowedSize: 10 * 1024 * 1024).CopyToAsync(memoryStream);
-            var buffer = memoryStream.ToArray();
-            Log($"Bytes read: {buffer.Length}");
+            if (selectedFile != null)
+            {
+                // Read file now (only when needed for API call)
+                Log($"Reading file: {selectedFile.Name}, Size: {selectedFile.Size}");
+                
+                // Read all bytes properly using MemoryStream
+                using var memoryStream = new MemoryStream();
+                await selectedFile.OpenReadStream(maxAllowedSize: 10 * 1024 * 1024).CopyToAsync(memoryStream);
+                var buffer = memoryStream.ToArray();
+                Log($"Bytes read: {buffer.Length}");
+                
+                base64Data = Convert.ToBase64String(buffer);
+                Log($"File read, base64 length: {base64Data.Length}");
+                
+                // Store for preview after success
+                imageBase64 = base64Data;
+                imagePreview = $"data:{selectedFile.ContentType};base64,{base64Data}";
+            }
+            else
+            {
+                // Use camera-captured base64 directly
+                base64Data = imageBase64!;
+                Log($"Using camera capture, base64 length: {base64Data.Length}");
+            }
             
-            var base64Data = Convert.ToBase64String(buffer);
-            Log($"File read, base64 length: {base64Data.Length}");
+            // Build query parameters
+            var queryParams = new List<string>();
+            if (debugMode)
+            {
+                queryParams.Add("debug=true");
+                queryParams.Add($"model={selectedModel}");
+            }
+            if (skipDetection) queryParams.Add("skipDetection=true");
+            var query = queryParams.Count > 0 ? "?" + string.Join("&", queryParams) : "";
             
-            var query = debugMode ? $"?debug=true&model={selectedModel}" : "";
             var url = $"/api/chess/predict/base64{query}";
-            Log($"POST {url}");
+            Log($"POST {url} (skipDetection={skipDetection})");
             Log($"HttpClient.BaseAddress = {Http.BaseAddress}");
             
             var payload = JsonSerializer.Serialize(new { image = base64Data });
@@ -779,10 +1457,6 @@
                 Log($"Validation: {(fenValidation.IsValid ? "Valid" : "Invalid")} - {fenValidation.Issues.Count} issues");
                 ParseBoardFromResult(result.Board);
                 debugImages = result.DebugImages;
-                
-                // Store for preview after success
-                imageBase64 = base64Data;
-                imagePreview = $"data:{selectedFile.ContentType};base64,{base64Data}";
             }
             else
             {
@@ -1095,7 +1769,7 @@
         
         try
         {
-            var payload = new { image = imageBase64 };
+            var payload = new { image = imageBase64, skip_detection = skipDetection };
             var json = JsonSerializer.Serialize(payload);
             var content = new StringContent(json, System.Text.Encoding.UTF8, "application/json");
             

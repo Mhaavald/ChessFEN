@@ -37,17 +37,27 @@ Pop-Location
 # Wait for API to start
 Start-Sleep -Seconds 3
 
-# Start Blazor Web
-Write-Host "`nStarting Blazor Web frontend on port 5002..." -ForegroundColor Yellow
+# Start Blazor Web with HTTPS for camera support on mobile
+Write-Host "`nStarting Blazor Web frontend on port 5002 (HTTPS: 5003)..." -ForegroundColor Yellow
 Push-Location "web\ChessFEN.Web\ChessFEN.Web"
-Start-Process -FilePath "dotnet" -ArgumentList "run", "--urls=http://localhost:5002" -NoNewWindow
+# Use 0.0.0.0 to allow connections from other devices on the network
+Start-Process -FilePath "dotnet" -ArgumentList "run", "--urls=https://0.0.0.0:5003;http://0.0.0.0:5002" -NoNewWindow
 Pop-Location
+
+# Get local IP for mobile access
+$localIP = (Get-NetIPAddress -AddressFamily IPv4 | Where-Object { $_.InterfaceAlias -notmatch "Loopback" -and $_.IPAddress -notmatch "^169" } | Select-Object -First 1).IPAddress
 
 Write-Host "`n=== All services started ===" -ForegroundColor Green
 Write-Host "  Python Inference: http://localhost:5000" -ForegroundColor Cyan
 Write-Host "  .NET API:         http://localhost:5001/swagger" -ForegroundColor Cyan
-Write-Host "  Web Frontend:     http://localhost:5002" -ForegroundColor Cyan
-Write-Host "`nPress Ctrl+C to stop all services" -ForegroundColor Yellow
+Write-Host "  Web Frontend:     http://localhost:5002 (HTTP)" -ForegroundColor Cyan
+Write-Host "  Web Frontend:     https://localhost:5003 (HTTPS)" -ForegroundColor Green
+if ($localIP) {
+    Write-Host "`n  Mobile access (HTTPS): https://${localIP}:5003" -ForegroundColor Magenta
+    Write-Host "  (Accept certificate warning on phone)" -ForegroundColor Yellow
+}
+Write-Host "`nFor mobile camera access, use HTTPS URL" -ForegroundColor Yellow
+Write-Host "Press Ctrl+C to stop all services" -ForegroundColor Yellow
 
 # Keep script running
 while ($true) { Start-Sleep -Seconds 60 }

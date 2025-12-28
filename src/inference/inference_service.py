@@ -211,9 +211,15 @@ transform = transforms.Compose([
 # Inference Logic
 # ============================
 
-def predict_board(img_bgr, model, debug=False):
+def predict_board(img_bgr, model, debug=False, skip_detection=False):
     """
     Detect board, classify pieces, return FEN and optional debug images.
+    
+    Args:
+        img_bgr: Input image in BGR format
+        model: PyTorch model for classification
+        debug: Include debug images in result
+        skip_detection: If True, treat the entire image as the board (skip detection/warp)
     
     Returns:
         dict with keys: fen, board (2D list), success, error, debug_images (if debug=True)
@@ -228,23 +234,33 @@ def predict_board(img_bgr, model, debug=False):
     if debug:
         result["debug_images"] = {}
     
-    # Detect board
-    quad = detect_board_quad_grid_aware(img_bgr, crop_ratio=0.80)
-    if quad is None:
-        result["error"] = "Could not detect chess board"
-        return result
-    
-    # Warp board
-    warped = warp_quad(img_bgr, quad, out_size=512)
-    tile_size = 512 // 8
-    
-    if debug:
-        # Board detection overlay
-        overlay = img_bgr.copy()
-        pts = quad.reshape((-1, 1, 2)).astype(np.int32)
-        cv2.polylines(overlay, [pts], True, (0, 255, 0), 3)
-        result["debug_images"]["detection"] = cv2.cvtColor(overlay, cv2.COLOR_BGR2RGB)
-        result["debug_images"]["warped"] = cv2.cvtColor(warped, cv2.COLOR_BGR2RGB)
+    if skip_detection:
+        # Treat entire image as the board - just resize to 512x512
+        warped = cv2.resize(img_bgr, (512, 512), interpolation=cv2.INTER_AREA)
+        tile_size = 512 // 8
+        
+        if debug:
+            # No detection overlay when skipping detection
+            result["debug_images"]["detection"] = cv2.cvtColor(img_bgr, cv2.COLOR_BGR2RGB)
+            result["debug_images"]["warped"] = cv2.cvtColor(warped, cv2.COLOR_BGR2RGB)
+    else:
+        # Detect board
+        quad = detect_board_quad_grid_aware(img_bgr, crop_ratio=0.80)
+        if quad is None:
+            result["error"] = "Could not detect chess board"
+            return result
+        
+        # Warp board
+        warped = warp_quad(img_bgr, quad, out_size=512)
+        tile_size = 512 // 8
+        
+        if debug:
+            # Board detection overlay
+            overlay = img_bgr.copy()
+            pts = quad.reshape((-1, 1, 2)).astype(np.int32)
+            cv2.polylines(overlay, [pts], True, (0, 255, 0), 3)
+            result["debug_images"]["detection"] = cv2.cvtColor(overlay, cv2.COLOR_BGR2RGB)
+            result["debug_images"]["warped"] = cv2.cvtColor(warped, cv2.COLOR_BGR2RGB)
     
     # Classify each tile
     board = [[None for _ in range(8)] for _ in range(8)]
@@ -403,6 +419,7 @@ def predict():
         - image: base64 encoded image OR file upload
         - debug: boolean (optional) - include debug images
         - model: string (optional) - model name to use
+        - skip_detection: boolean (optional) - skip board detection, treat image as board
     
     Response:
         - success: boolean
@@ -412,8 +429,9 @@ def predict():
     """
     debug = request.args.get('debug', 'false').lower() == 'true'
     model_name = request.args.get('model', None)
+    skip_detection = request.args.get('skip_detection', 'false').lower() == 'true'
     
-    print(f"[PREDICT] Received request, debug={debug}, model={model_name}")
+    print(f"[PREDICT] Received request, debug={debug}, model={model_name}, skip_detection={skip_detection}")
     
     # Load model
     try:
@@ -477,9 +495,9 @@ def predict():
         print("[PREDICT] Invalid image - img_bgr is None")
         return jsonify({"success": False, "error": "Invalid image"}), 400
     
-    print(f"[PREDICT] Running prediction on image {img_bgr.shape}")
+    print(f"[PREDICT] Running prediction on image {img_bgr.shape}, skip_detection={skip_detection}")
     # Run prediction
-    result = predict_board(img_bgr, model, debug=debug)
+    result = predict_board(img_bgr, model, debug=debug, skip_detection=skip_detection)
     
     # Convert debug images to base64
     if debug and result.get("debug_images"):
@@ -546,6 +564,11 @@ def align_grid():
     """
     print("[ALIGN] Received grid alignment request")
     
+    # Check skip_detection flag
+    skip_detection = False
+    if request.json and 'skip_detection' in request.json:
+        skip_detection = request.json.get('skip_detection', False)
+    
     # Get image
     img_bgr = None
     if request.json and 'image' in request.json:
@@ -576,23 +599,28 @@ def align_grid():
     if img_bgr is None:
         return jsonify({"success": False, "error": "Invalid image"}), 400
     
-    print(f"[ALIGN] Analyzing image {img_bgr.shape}")
+    print(f"[ALIGN] Analyzing image {img_bgr.shape}, skip_detection={skip_detection}")
     
-    # Step 1: Detect the board
-    quad = detect_board_quad_grid_aware(img_bgr)
-    if quad is None:
-        print("[ALIGN] No board detected")
-        return jsonify({
-            "success": True,
-            "board_detected": False,
-            "piece_found": False,
-            "suggestion": "Could not detect a chess board in the image. Try a clearer photo with better lighting.",
-            "overlay": None
-        })
-    
-    # Step 2: Warp to square
-    warped = warp_quad(img_bgr, quad, out_size=640)
-    print(f"[ALIGN] Warped to {warped.shape}")
+    # Step 1: Detect the board or use image as-is
+    if skip_detection:
+        # Treat entire image as the board - resize to 640x640
+        warped = cv2.resize(img_bgr, (640, 640), interpolation=cv2.INTER_AREA)
+        print(f"[ALIGN] Skip detection - resized to {warped.shape}")
+    else:
+        quad = detect_board_quad_grid_aware(img_bgr)
+        if quad is None:
+            print("[ALIGN] No board detected")
+            return jsonify({
+                "success": True,
+                "board_detected": False,
+                "piece_found": False,
+                "suggestion": "Could not detect a chess board in the image. Try a clearer photo with better lighting.",
+                "overlay": None
+            })
+        
+        # Step 2: Warp to square
+        warped = warp_quad(img_bgr, quad, out_size=640)
+        print(f"[ALIGN] Warped to {warped.shape}")
     
     # Step 3: Run piece detection on warped board
     detection = suggest_grid_adjustment(warped)
