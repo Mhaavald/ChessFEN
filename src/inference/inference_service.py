@@ -343,14 +343,23 @@ def predict_tile_with_offset_search(warped, row, col, tile_size, model):
                 pred_idx = probs.argmax().item()
                 conf = probs[0, pred_idx].item()
             
-            if conf > best_conf:
-                best_piece = CLASSES[pred_idx]
-                best_conf = conf
+            candidate_piece = CLASSES[pred_idx]
+            
+            # Apply penalty for switching from a piece to "empty"
+            # This prevents the common failure mode where offset causes piece to be missed
+            effective_conf = conf
+            if baseline_piece != "empty" and candidate_piece == "empty":
+                # Strong penalty - require much higher confidence to switch to empty
+                effective_conf = conf * 0.5  # Halve the effective confidence
+            
+            if effective_conf > best_conf:
+                best_piece = candidate_piece
+                best_conf = conf  # Store actual confidence, not penalized one
                 best_offset = (dx_pct, dy_pct)
     
     # Log improvement if offset helped
     if best_offset != (0, 0) and best_conf > baseline_conf + 0.05:
-        print(f"[OFFSET] Improved: baseline {baseline_piece} {baseline_conf:.1%} → {best_piece} {best_conf:.1%} at offset {best_offset}")
+        print(f"[OFFSET] Improved: baseline {baseline_piece} {baseline_conf:.1%} -> {best_piece} {best_conf:.1%} at offset {best_offset}")
     
     return best_piece, best_conf, best_offset
 
@@ -456,6 +465,415 @@ def validate_board_detection(board, confidences, avg_confidence, low_conf_count)
     return True, "OK"
 
 
+def find_missing_king(warped, board, confidences, missing_king, model, tile_size):
+    """
+    Search for a missing king among empty and low-confidence squares.
+    
+    Args:
+        warped: Warped board image
+        board: 8x8 list of current predictions
+        confidences: 8x8 list of confidence values
+        missing_king: 'wK' or 'bK'
+        model: Classification model
+        tile_size: Size of each tile
+    
+    Returns:
+        (row, col, confidence) of best candidate, or None if not found
+    """
+    king_idx = CLASSES.index(missing_king)
+    candidates = []
+    
+    # Collect candidate squares: empty predictions, low confidence, and edge squares
+    for row in range(8):
+        for col in range(8):
+            piece = board[row][col]
+            conf = confidences[row][col]
+            
+            # Priority 1: Empty squares (most likely to have missed a piece)
+            # Priority 2: Low confidence squares
+            # Priority 3: Edge/corner squares (alignment issues)
+            is_edge = row == 0 or row == 7 or col == 0 or col == 7
+            is_empty = piece == "empty"
+            is_low_conf = conf < 0.8
+            
+            if is_empty or is_low_conf or is_edge:
+                candidates.append((row, col, is_empty, is_low_conf, is_edge))
+    
+    print(f"[KING SEARCH] Looking for {missing_king} among {len(candidates)} candidates")
+    
+    # For each candidate, use offset search to find best king probability
+    best_result = None
+    best_king_prob = 0.0
+    
+    for row, col, is_empty, is_low_conf, is_edge in candidates:
+        # Get predictions with offset search
+        piece, conf, offset = predict_tile_with_offset_search(
+            warped, row, col, tile_size, model
+        )
+        
+        # Get the raw probabilities for this tile with the best offset
+        h, w = warped.shape[:2]
+        base_y, base_x = row * tile_size, col * tile_size
+        
+        if offset != (0, 0):
+            dx_pct, dy_pct = offset
+            dy = int(dy_pct * tile_size)
+            dx = int(dx_pct * tile_size)
+            oy1 = max(0, base_y + dy)
+            oy2 = min(h, base_y + tile_size + dy)
+            ox1 = max(0, base_x + dx)
+            ox2 = min(w, base_x + tile_size + dx)
+            tile = warped[oy1:oy2, ox1:ox2]
+            if tile.shape[0] != tile_size or tile.shape[1] != tile_size:
+                tile = cv2.resize(tile, (tile_size, tile_size))
+        else:
+            y1, y2 = base_y, base_y + tile_size
+            x1, x2 = base_x, base_x + tile_size
+            tile = warped[y1:y2, x1:x2]
+        
+        tile_rgb = cv2.cvtColor(tile, cv2.COLOR_BGR2RGB)
+        pil_img = Image.fromarray(tile_rgb)
+        img_tensor = transform(pil_img).unsqueeze(0)
+        
+        with torch.no_grad():
+            outputs = model(img_tensor)
+            probs = torch.softmax(outputs, dim=1)
+            king_prob = probs[0, king_idx].item()
+        
+        if king_prob > best_king_prob:
+            best_king_prob = king_prob
+            best_result = (row, col, king_prob, offset)
+            
+        # Debug output for promising candidates
+        if king_prob > 0.1:
+            square = f"{'abcdefgh'[col]}{8-row}"
+            print(f"  {square}: {missing_king} prob = {king_prob*100:.1f}%")
+    
+    if best_result and best_king_prob > 0.05:  # At least 5% confidence
+        row, col, prob, offset = best_result
+        square = f"{'abcdefgh'[col]}{8-row}"
+        print(f"[KING SEARCH] Found {missing_king} at {square} with {prob*100:.1f}% confidence")
+        return best_result
+    
+    print(f"[KING SEARCH] Could not find {missing_king}")
+    return None
+
+
+def validate_and_fix_kings(warped, board, confidences, model, tile_size):
+    """
+    Check for missing kings and attempt to find them.
+    
+    Args:
+        warped: Warped board image
+        board: 8x8 list of predictions (will be modified in place)
+        confidences: 8x8 list of confidences (will be modified in place)
+        model: Classification model
+        tile_size: Tile size in pixels
+    
+    Returns:
+        fixes_made: List of (square, piece) fixes applied
+    """
+    # Count kings
+    wK_count = sum(1 for r in range(8) for c in range(8) if board[r][c] == "wK")
+    bK_count = sum(1 for r in range(8) for c in range(8) if board[r][c] == "bK")
+    
+    fixes_made = []
+    
+    # Check for missing white king
+    if wK_count == 0:
+        print("[VALIDATION] Missing white king - searching...")
+        result = find_missing_king(warped, board, confidences, "wK", model, tile_size)
+        if result:
+            row, col, prob, offset = result
+            old_piece = board[row][col]
+            board[row][col] = "wK"
+            confidences[row][col] = prob
+            square = f"{'abcdefgh'[col]}{8-row}"
+            fixes_made.append((square, "wK", old_piece))
+            print(f"[VALIDATION] Fixed: {square} {old_piece} -> wK")
+    
+    # Check for missing black king
+    if bK_count == 0:
+        print("[VALIDATION] Missing black king - searching...")
+        result = find_missing_king(warped, board, confidences, "bK", model, tile_size)
+        if result:
+            row, col, prob, offset = result
+            old_piece = board[row][col]
+            board[row][col] = "bK"
+            confidences[row][col] = prob
+            square = f"{'abcdefgh'[col]}{8-row}"
+            fixes_made.append((square, "bK", old_piece))
+            print(f"[VALIDATION] Fixed: {square} {old_piece} -> bK")
+    
+    return fixes_made
+
+
+def fix_duplicate_queens(warped, board, confidences, model, tile_size):
+    """
+    If there are 2+ queens of the same color, try to fix by checking if one should be the other color.
+    In standard chess, each side has at most 1 queen (promotions are rare).
+    
+    Args:
+        warped: Warped board image
+        board: 8x8 list of predictions (will be modified in place)
+        confidences: 8x8 list of confidences (will be modified in place)
+        model: Classification model
+        tile_size: Tile size in pixels
+    
+    Returns:
+        tuple: (fixes_made, questionable_squares)
+            - fixes_made: List of fixes applied
+            - questionable_squares: List of squares that might have color issues
+    """
+    fixes_made = []
+    questionable_squares = []
+    
+    # Find all queens
+    wQ_positions = [(r, c, confidences[r][c]) for r in range(8) for c in range(8) if board[r][c] == "wQ"]
+    bQ_positions = [(r, c, confidences[r][c]) for r in range(8) for c in range(8) if board[r][c] == "bQ"]
+    
+    # Check for duplicate white queens
+    if len(wQ_positions) > 1 and len(bQ_positions) == 0:
+        print(f"[QUEEN FIX] Found {len(wQ_positions)} white queens, 0 black queens")
+        # The one with lowest confidence is most likely to be wrong
+        wQ_positions.sort(key=lambda x: x[2])  # Sort by confidence ascending
+        lowest_conf_row, lowest_conf_col, lowest_conf = wQ_positions[0]
+        highest_conf = wQ_positions[-1][2]
+        
+        # Calculate confidence difference
+        conf_diff = highest_conf - lowest_conf
+        
+        # Position-based heuristic: if a "white" queen is on ranks 7-8 (black's back ranks),
+        # it's very likely to be a misidentified black queen
+        is_on_black_back_ranks = lowest_conf_row <= 1  # rows 0-1 are ranks 8-7 (black's back ranks)
+        
+        square = f"{'abcdefgh'[lowest_conf_col]}{8-lowest_conf_row}"
+        rank = 8 - lowest_conf_row
+        print(f"[QUEEN FIX] Confidence difference: {conf_diff*100:.1f}% (highest: {highest_conf*100:.1f}%, lowest: {lowest_conf*100:.1f}%)")
+        print(f"[QUEEN FIX] Candidate {square} (rank {rank}) is {'on black back ranks' if is_on_black_back_ranks else 'NOT on black back ranks'}")
+        
+        # Apply fix if: significant confidence diff OR queen is on black's back ranks (7-8)
+        if conf_diff > 0.03 or is_on_black_back_ranks:
+            print(f"[QUEEN FIX] Changing {square} from wQ to bQ")
+            board[lowest_conf_row][lowest_conf_col] = "bQ"
+            confidences[lowest_conf_row][lowest_conf_col] = lowest_conf
+            fixes_made.append((square, "bQ", "wQ"))
+        else:
+            print(f"[QUEEN FIX] Not changing - marking as questionable")
+            # Mark ALL queens as questionable since we don't know which one is wrong
+            for r, c, _ in wQ_positions:
+                sq = f"{'abcdefgh'[c]}{8-r}"
+                questionable_squares.append({
+                    "square": sq,
+                    "piece": "wQ",
+                    "reason": "Detected 2 white queens, 0 black - one might be black queen"
+                })
+    
+    # Check for duplicate black queens
+    if len(bQ_positions) > 1 and len(wQ_positions) == 0:
+        print(f"[QUEEN FIX] Found {len(bQ_positions)} black queens, 0 white queens")
+        # The one with lowest confidence is most likely to be wrong
+        bQ_positions.sort(key=lambda x: x[2])  # Sort by confidence ascending
+        lowest_conf_row, lowest_conf_col, lowest_conf = bQ_positions[0]
+        highest_conf = bQ_positions[-1][2]
+        
+        # Calculate confidence difference
+        conf_diff = highest_conf - lowest_conf
+        
+        # Position-based heuristic: if a "black" queen is on ranks 1-2 (white's back ranks),
+        # it's very likely to be a misidentified white queen (white rarely loses queen on back rank)
+        is_on_white_back_ranks = lowest_conf_row >= 6  # rows 6-7 are ranks 2-1 (white's back ranks)
+        
+        square = f"{'abcdefgh'[lowest_conf_col]}{8-lowest_conf_row}"
+        rank = 8 - lowest_conf_row
+        print(f"[QUEEN FIX] Confidence difference: {conf_diff*100:.1f}% (highest: {highest_conf*100:.1f}%, lowest: {lowest_conf*100:.1f}%)")
+        print(f"[QUEEN FIX] Candidate {square} (rank {rank}) is {'on white back ranks' if is_on_white_back_ranks else 'NOT on white back ranks'}")
+        
+        # Apply fix if: significant confidence diff OR queen is on white's back ranks (1-2)
+        if conf_diff > 0.03 or is_on_white_back_ranks:
+            print(f"[QUEEN FIX] Changing {square} from bQ to wQ")
+            board[lowest_conf_row][lowest_conf_col] = "wQ"
+            confidences[lowest_conf_row][lowest_conf_col] = lowest_conf
+            fixes_made.append((square, "wQ", "bQ"))
+        else:
+            print(f"[QUEEN FIX] Not changing - marking as questionable")
+            # Mark ALL queens as questionable since we don't know which one is wrong
+            for r, c, _ in bQ_positions:
+                sq = f"{'abcdefgh'[c]}{8-r}"
+                questionable_squares.append({
+                    "square": sq,
+                    "piece": "bQ",
+                    "reason": "Detected 2 black queens, 0 white - one might be white queen"
+                })
+    
+    return fixes_made, questionable_squares
+
+
+def find_board_from_kings(img_bgr, model, debug=False):
+    """
+    Fallback board detection: scan image for kings and estimate board location.
+    
+    Kings are always present and have distinctive shapes. This function:
+    1. Scans the image center area with a sliding window
+    2. Uses the model to detect king probabilities
+    3. If kings found, estimates the board quadrilateral
+    
+    Args:
+        img_bgr: Input image in BGR format
+        model: PyTorch model for classification
+        debug: Include debug info
+    
+    Returns:
+        quad: 4 corner points of estimated board (or None if not found)
+        debug_info: dict with search details if debug=True
+    """
+    h, w = img_bgr.shape[:2]
+    debug_info = {} if debug else None
+    
+    # Estimate tile size based on image - assume board is 50-90% of image
+    min_tile = min(h, w) // 16  # Board = 8 tiles, so min 50% -> 8 tiles
+    max_tile = min(h, w) // 8   # Board = 8 tiles, so max 100% -> 8 tiles
+    
+    # Try a few tile sizes
+    tile_sizes = [
+        min(h, w) // 10,  # ~80% of image is board
+        min(h, w) // 12,  # ~67% of image is board  
+        min(h, w) // 14,  # ~57% of image is board
+    ]
+    
+    best_king_score = 0
+    best_king_pos = None
+    best_tile_size = None
+    best_king_type = None
+    
+    # Scan center region of image (kings are usually somewhere on the board)
+    # Focus on center 80% of image
+    margin_y = int(h * 0.1)
+    margin_x = int(w * 0.1)
+    
+    king_candidates = []
+    
+    for tile_size in tile_sizes:
+        if tile_size < 20:
+            continue
+            
+        # Slide window across image
+        step = tile_size // 2  # 50% overlap
+        
+        for y in range(margin_y, h - margin_y - tile_size, step):
+            for x in range(margin_x, w - margin_x - tile_size, step):
+                tile = img_bgr[y:y+tile_size, x:x+tile_size]
+                
+                # Resize to model input size
+                tile_resized = cv2.resize(tile, (TILE_SIZE, TILE_SIZE))
+                tile_rgb = cv2.cvtColor(tile_resized, cv2.COLOR_BGR2RGB)
+                
+                tensor = torch.from_numpy(tile_rgb).permute(2, 0, 1).float() / 255.0
+                tensor = tensor.unsqueeze(0)
+                
+                with torch.no_grad():
+                    logits = model(tensor)
+                    probs = torch.softmax(logits, dim=1)[0]
+                
+                wK_prob = probs[CLASSES.index('wK')].item()
+                bK_prob = probs[CLASSES.index('bK')].item()
+                
+                # Check if this looks like a king
+                if wK_prob > 0.5:
+                    king_candidates.append((wK_prob, x, y, tile_size, 'wK'))
+                if bK_prob > 0.5:
+                    king_candidates.append((bK_prob, x, y, tile_size, 'bK'))
+    
+    if not king_candidates:
+        if debug:
+            debug_info["message"] = "No kings found in image scan"
+        return None, debug_info
+    
+    # Sort by probability
+    king_candidates.sort(key=lambda x: -x[0])
+    
+    if debug:
+        debug_info["king_candidates"] = len(king_candidates)
+        debug_info["best_candidates"] = [
+            {"prob": p, "x": x, "y": y, "tile": t, "type": k}
+            for p, x, y, t, k in king_candidates[:5]
+        ]
+    
+    # Use best king to estimate board
+    prob, kx, ky, tile_size, king_type = king_candidates[0]
+    
+    # King center
+    king_cx = kx + tile_size // 2
+    king_cy = ky + tile_size // 2
+    
+    # Estimate which square the king is on (assuming standard initial position as hint)
+    # White king usually on e1 or nearby, black king on e8 or nearby
+    # But in practice, king could be anywhere - we'll estimate board covers most of image
+    
+    # Assume board is centered roughly around image center
+    # And tile_size tells us the scale
+    board_size = tile_size * 8
+    
+    # Estimate board center - use image center weighted toward king position
+    img_cx, img_cy = w // 2, h // 2
+    board_cx = (img_cx + king_cx) // 2  # Average of image center and king
+    board_cy = (img_cy + king_cy) // 2
+    
+    # Calculate board corners
+    half_board = board_size // 2
+    x1 = max(0, board_cx - half_board)
+    y1 = max(0, board_cy - half_board)
+    x2 = min(w, board_cx + half_board)
+    y2 = min(h, board_cy + half_board)
+    
+    # Adjust to maintain square aspect
+    actual_w = x2 - x1
+    actual_h = y2 - y1
+    if actual_w != actual_h:
+        size = min(actual_w, actual_h)
+        x2 = x1 + size
+        y2 = y1 + size
+    
+    # Create quad (clockwise from top-left)
+    quad = np.array([
+        [x1, y1],  # top-left
+        [x2, y1],  # top-right
+        [x2, y2],  # bottom-right
+        [x1, y2],  # bottom-left
+    ], dtype=np.float32)
+    
+    if debug:
+        debug_info["estimated_board"] = {
+            "from_king": king_type,
+            "king_pos": (kx, ky),
+            "tile_size": tile_size,
+            "board_corners": quad.tolist()
+        }
+    
+    print(f"[KING FALLBACK] Found {king_type} at ({kx},{ky}) with {prob*100:.1f}% confidence")
+    print(f"[KING FALLBACK] Estimated board: {x1},{y1} to {x2},{y2} (tile_size={tile_size})")
+    
+    return quad, debug_info
+
+
+def get_piece_probability(warped, row, col, tile_size, model, piece_class):
+    """Get the probability for a specific piece class at a position."""
+    h, w = warped.shape[:2]
+    y1, y2 = row * tile_size, (row + 1) * tile_size
+    x1, x2 = col * tile_size, (col + 1) * tile_size
+    tile = warped[y1:y2, x1:x2]
+    
+    tile_rgb = cv2.cvtColor(tile, cv2.COLOR_BGR2RGB)
+    pil_img = Image.fromarray(tile_rgb)
+    img_tensor = transform(pil_img).unsqueeze(0)
+    
+    with torch.no_grad():
+        outputs = model(img_tensor)
+        probs = torch.softmax(outputs, dim=1)
+        piece_idx = CLASSES.index(piece_class)
+        return probs[0, piece_idx].item()
+
+
 def detect_board_with_validation(img_bgr, model, debug=False):
     """
     Detect board using multiple candidates and validate with model predictions.
@@ -550,6 +968,21 @@ def detect_board_with_validation(img_bgr, model, debug=False):
             debug_info["warning"] = "No candidate passed validation, using best grid score"
         return warped, best_quad, board, confidences, avg_confidence, debug_info
     
+    # FALLBACK: No edge-based candidates found - try king-based detection
+    print("[DETECTION] No edge candidates found, trying king-based fallback...")
+    king_quad, king_debug = find_board_from_kings(img_bgr, model, debug=debug)
+    
+    if king_quad is not None:
+        warped = warp_quad(img_bgr, king_quad, out_size=WARP_SIZE)
+        tile_size = TILE_SIZE
+        board, confidences, avg_confidence, low_conf_count = predict_tiles_with_confidence(
+            warped, model, tile_size
+        )
+        if debug:
+            debug_info["king_fallback"] = king_debug
+            debug_info["warning"] = "Used king-based fallback detection"
+        return warped, king_quad, board, confidences, avg_confidence, debug_info
+    
     return None, None, None, None, None, debug_info
 
 
@@ -619,6 +1052,25 @@ def predict_board(img_bgr, model, debug=False, skip_detection=False):
     
     # Add confidence info to result
     result["avg_confidence"] = avg_confidence
+    
+    # Validate and fix missing kings
+    fixes = validate_and_fix_kings(warped, board, confidences, model, tile_size)
+    if fixes:
+        result["king_fixes"] = fixes
+        # Recalculate average confidence after fixes
+        all_confs = [confidences[r][c] for r in range(8) for c in range(8)]
+        result["avg_confidence"] = sum(all_confs) / len(all_confs)
+    
+    # Fix duplicate queens (e.g., 2 black queens when there should be 1 of each)
+    queen_fixes, questionable_squares = fix_duplicate_queens(warped, board, confidences, model, tile_size)
+    if queen_fixes:
+        result["queen_fixes"] = queen_fixes
+        # Recalculate average confidence after fixes
+        all_confs = [confidences[r][c] for r in range(8) for c in range(8)]
+        result["avg_confidence"] = sum(all_confs) / len(all_confs)
+    
+    if questionable_squares:
+        result["questionable_squares"] = questionable_squares
     
     # Generate FEN
     fen_rows = []

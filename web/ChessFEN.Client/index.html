@@ -67,25 +67,37 @@
             <!-- Loading State -->
             <section class="card loading-card" id="loadingSection" hidden>
                 <div class="spinner"></div>
-                <p>Analyzing board...</p>
+                <p id="loadingStatus">Analyzing board...</p>
+                <div class="progress-stages" id="progressStages">
+                    <span class="stage active" data-stage="detect">🔍 Detecting</span>
+                    <span class="stage" data-stage="warp">📐 Warping</span>
+                    <span class="stage" data-stage="classify">♟️ Classifying</span>
+                    <span class="stage" data-stage="validate">✓ Validating</span>
+                </div>
             </section>
 
             <!-- Step 2: Results -->
             <section class="card" id="resultsSection" hidden>
                 <h2>2. Results</h2>
 
-                <!-- Captured Board Image -->
-                <div class="captured-board-container" id="capturedBoardContainer" hidden>
-                    <h3>📸 Captured Board</h3>
-                    <img id="capturedBoardImage" alt="Captured board" class="captured-board-image">
-                </div>
+                <!-- Boards side by side -->
+                <div class="boards-row">
+                    <!-- Captured Board Image -->
+                    <div class="captured-board-container" id="capturedBoardContainer" hidden>
+                        <h3>📸 Captured</h3>
+                        <img id="capturedBoardImage" alt="Captured board" class="captured-board-image">
+                    </div>
 
-                <!-- Board Display -->
-                <div class="board-container">
-                    <table class="chess-board" id="chessBoard"></table>
-                    <div class="board-actions">
-                        <button class="btn btn-sm btn-outline" id="editBoardBtn" title="Edit position">✏️ Edit</button>
-                        <button class="btn btn-sm btn-outline" id="resetBoardBtn" title="Reset to original" hidden>↩️ Reset</button>
+                    <!-- Board Display -->
+                    <div class="predicted-board-container">
+                        <h3 id="predictedBoardTitle" hidden>♟️ Predicted</h3>
+                        <div class="board-wrapper">
+                            <table class="chess-board" id="chessBoard"></table>
+                        </div>
+                        <div class="board-actions">
+                            <button class="btn btn-sm btn-outline" id="editBoardBtn" title="Edit position">✏️ Edit</button>
+                            <button class="btn btn-sm btn-outline" id="resetBoardBtn" title="Reset to original" hidden>↩️ Reset</button>
+                        </div>
                     </div>
                 </div>
 
@@ -164,25 +176,26 @@
                 </div>
 
                 <!-- Chess.com Search -->
-                <div class="search-section">
+                <div class="search-section" id="findGamesSection">
                     <h3>🔍 Find Games on Chess.com</h3>
-                    <div class="search-buttons">
-                        <a class="btn btn-chess-com" id="searchWhiteBtn" target="_blank">
-                            ⬜ White to Move
-                        </a>
-                        <a class="btn btn-chess-com" id="searchBlackBtn" target="_blank">
-                            ⬛ Black to Move
-                        </a>
-                    </div>
-                    <div class="check-games-row">
-                        <button class="btn btn-primary" id="checkGamesBtn">
-                            🔍 Check for Games
-                        </button>
-                        <span class="check-games-hint">Check if any games exist</span>
-                    </div>
-                    <div class="games-results" id="gamesResults" hidden>
-                        <div class="games-result" id="whiteGamesResult"></div>
-                        <div class="games-result" id="blackGamesResult"></div>
+                    <div class="games-check-row">
+                        <button class="btn btn-primary" id="checkGamesBtn">🔍 Search</button>
+                        <div class="games-check-status" id="gamesCheckStatus" hidden>
+                            <span class="checking-text">⏳ Checking...</span>
+                        </div>
+                        <div class="games-found-icons" id="gamesFoundIcons" hidden>
+                            <a class="game-found-icon white" id="whiteGameIcon" target="_blank" title="Games found with White to move">
+                                <span class="icon">♔</span>
+                                <span class="label">White</span>
+                            </a>
+                            <a class="game-found-icon black" id="blackGameIcon" target="_blank" title="Games found with Black to move">
+                                <span class="icon">♚</span>
+                                <span class="label">Black</span>
+                            </a>
+                        </div>
+                        <div class="no-games-found" id="noGamesFound" hidden>
+                            <span>No games found</span>
+                        </div>
                     </div>
                 </div>
 

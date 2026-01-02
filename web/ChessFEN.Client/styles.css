@@ -297,10 +297,48 @@ body {
     to { transform: rotate(360deg); }
 }
 
+/* Progress stages */
+.progress-stages {
+    display: flex;
+    justify-content: center;
+    gap: 8px;
+    margin-top: 16px;
+    flex-wrap: wrap;
+}
+
+.progress-stages .stage {
+    padding: 6px 12px;
+    border-radius: 16px;
+    font-size: 0.85rem;
+    background: var(--bg-secondary);
+    color: var(--text-secondary);
+    transition: all 0.3s ease;
+    opacity: 0.5;
+}
+
+.progress-stages .stage.active {
+    background: var(--primary);
+    color: white;
+    opacity: 1;
+    animation: pulse 1s ease-in-out infinite;
+}
+
+.progress-stages .stage.done {
+    background: var(--success);
+    color: white;
+    opacity: 1;
+}
+
+@keyframes pulse {
+    0%, 100% { transform: scale(1); }
+    50% { transform: scale(1.05); }
+}
+
 /* Captured Board Image */
 .captured-board-container {
-    margin-bottom: 16px;
-    text-align: center;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
 }
 
 .captured-board-container h3 {
@@ -309,18 +347,37 @@ body {
 }
 
 .captured-board-image {
-    max-width: 320px;
-    width: 100%;
+    width: 320px;
+    height: 320px;
+    object-fit: cover;
     border-radius: var(--radius-sm);
     border: 2px solid var(--border);
     box-shadow: var(--shadow);
 }
 
 /* Chess Board */
-.board-container {
+.boards-row {
     display: flex;
     justify-content: center;
+    gap: 24px;
     margin-bottom: 16px;
+    flex-wrap: wrap;
+}
+
+.predicted-board-container {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+}
+
+.predicted-board-container h3 {
+    margin-bottom: 8px;
+    font-size: 0.9rem;
+}
+
+.board-wrapper {
+    display: flex;
+    justify-content: center;
 }
 
 .chess-board {
@@ -388,52 +445,94 @@ body {
 .search-buttons {
     display: flex;
     gap: 12px;
-}
-
-.check-games-row {
-    display: flex;
+    flex-wrap: wrap;
     align-items: center;
-    gap: 12px;
-    margin-top: 12px;
 }
 
-.check-games-hint {
-    color: var(--text-muted);
-    font-size: 0.875rem;
+/* Game Check Row */
+.games-check-row {
+    display: flex;
+    gap: 16px;
+    align-items: center;
+    flex-wrap: wrap;
 }
 
-.games-results {
-    margin-top: 12px;
-    padding: 12px;
-    background: var(--bg);
-    border-radius: var(--radius-sm);
+/* Game Check Status */
+.games-check-status {
+    padding: 8px 12px;
 }
 
-.games-result {
-    padding: 8px 0;
-    font-size: 0.95rem;
-}
-
-.games-result:first-child {
-    border-bottom: 1px solid var(--border);
-}
-
-.games-result .found {
-    color: var(--success);
-    font-weight: 500;
-}
-
-.games-result .not-found {
-    color: var(--text-muted);
-}
-
-.games-result .checking {
+.games-check-status .checking-text {
     color: var(--primary);
     font-style: italic;
 }
 
-.games-result .error {
-    color: var(--danger);
+.no-games-found {
+    padding: 8px 12px;
+    color: var(--text-muted);
+}
+
+/* Games Found Icons */
+.games-found-icons {
+    display: flex;
+    gap: 12px;
+    align-items: center;
+}
+
+.game-found-icon {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    padding: 12px 24px;
+    border-radius: var(--radius);
+    text-decoration: none;
+    cursor: pointer;
+    transition: transform 0.15s, box-shadow 0.15s;
+}
+
+.game-found-icon:hover {
+    transform: scale(1.05);
+    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3);
+}
+
+.game-found-icon .icon {
+    font-size: 2.5rem;
+    line-height: 1;
+}
+
+.game-found-icon .label {
+    font-size: 0.85rem;
+    font-weight: 600;
+    margin-top: 4px;
+}
+
+.game-found-icon.white {
+    background: linear-gradient(135deg, #f5f5f5, #e0e0e0);
+    border: 2px solid #ccc;
+}
+
+.game-found-icon.white .icon {
+    color: #333;
+    text-shadow: 0 1px 2px rgba(0, 0, 0, 0.2);
+}
+
+.game-found-icon.white .label {
+    color: #333;
+}
+
+.game-found-icon.black {
+    background: linear-gradient(135deg, #444, #222);
+    border: 2px solid #666;
+}
+
+.game-found-icon.black .icon {
+    color: #fff;
+    text-shadow: 0 1px 2px rgba(0, 0, 0, 0.5);
+}
+
+.game-found-icon.black .label {
+    color: #fff;
 }
 
 /* Result Actions */
@@ -732,6 +831,22 @@ body {
     align-items: center;
     justify-content: center;
     line-height: 1;
+}
+
+/* Questionable piece color (e.g., might be wrong queen color) */
+.chess-board td.questionable {
+    position: relative;
+    box-shadow: inset 0 0 0 3px #f59e0b;  /* Orange border */
+}
+
+.chess-board td.questionable::after {
+    content: '⚠';
+    position: absolute;
+    top: 2px;
+    right: 3px;
+    font-size: 14px;
+    color: #f59e0b;
+    text-shadow: 0 0 2px white, 0 0 4px white;
 }
 
 .correction-notice {

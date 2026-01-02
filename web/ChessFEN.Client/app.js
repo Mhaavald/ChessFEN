@@ -64,12 +64,10 @@ function cacheElements() {
     elements.fenInput = document.getElementById('fenInput');
     elements.fenStatus = document.getElementById('fenStatus');
     elements.copyFenBtn = document.getElementById('copyFenBtn');
-    elements.searchWhiteBtn = document.getElementById('searchWhiteBtn');
     elements.analyzeWhiteBtn = document.getElementById('analyzeWhiteBtn');
     elements.analyzeBlackBtn = document.getElementById('analyzeBlackBtn');
     elements.playWhiteBtn = document.getElementById('playWhiteBtn');
     elements.playBlackBtn = document.getElementById('playBlackBtn');
-    elements.searchBlackBtn = document.getElementById('searchBlackBtn');
     elements.newScanBtn = document.getElementById('newScanBtn');
     elements.retryBtn = document.getElementById('retryBtn');
     
@@ -90,11 +88,14 @@ function cacheElements() {
     elements.correctionCount = document.getElementById('correctionCount');
     elements.submitCorrectionsBtn = document.getElementById('submitCorrectionsBtn');
     
-    // Check for games elements
+    // Game check elements
+    elements.findGamesSection = document.getElementById('findGamesSection');
     elements.checkGamesBtn = document.getElementById('checkGamesBtn');
-    elements.gamesResults = document.getElementById('gamesResults');
-    elements.whiteGamesResult = document.getElementById('whiteGamesResult');
-    elements.blackGamesResult = document.getElementById('blackGamesResult');
+    elements.gamesCheckStatus = document.getElementById('gamesCheckStatus');
+    elements.gamesFoundIcons = document.getElementById('gamesFoundIcons');
+    elements.noGamesFound = document.getElementById('noGamesFound');
+    elements.whiteGameIcon = document.getElementById('whiteGameIcon');
+    elements.blackGameIcon = document.getElementById('blackGameIcon');
     
     // Deep analysis elements
     elements.deepAnalysisResults = document.getElementById('deepAnalysisResults');
@@ -128,6 +129,7 @@ function bindEvents() {
     elements.submitCorrectionsBtn.addEventListener('click', submitCorrections);
     
     // Check for games
+    // Game check is now automatic - no button event needed
     elements.checkGamesBtn.addEventListener('click', checkForGames);
     
     // Piece palette clicks
@@ -391,6 +393,9 @@ async function analyzeBoard() {
             // Store confidences for highlighting uncertain predictions
             state.confidences = result.confidences || result.Confidences || null;
             
+            // Store questionable squares (e.g., potential queen color confusion)
+            state.questionableSquares = result.questionable_squares || result.questionableSquares || null;
+            
             // Store warped image for feedback (if available from debug response)
             const debugImages = result.debug_images || result.debugImages;
             if (debugImages && debugImages.warped) {
@@ -559,14 +564,19 @@ function displayResults() {
     // Show captured board image (warped image if available, otherwise original)
     const capturedBoardContainer = document.getElementById('capturedBoardContainer');
     const capturedBoardImage = document.getElementById('capturedBoardImage');
+    const predictedBoardTitle = document.getElementById('predictedBoardTitle');
+    
     if (state.warpedImageBase64) {
         capturedBoardImage.src = 'data:image/png;base64,' + state.warpedImageBase64;
         capturedBoardContainer.hidden = false;
+        predictedBoardTitle.hidden = false;
     } else if (state.imageBase64) {
         capturedBoardImage.src = 'data:image/jpeg;base64,' + state.imageBase64;
         capturedBoardContainer.hidden = false;
+        predictedBoardTitle.hidden = false;
     } else {
         capturedBoardContainer.hidden = true;
+        predictedBoardTitle.hidden = true;
     }
     
     // Render board
@@ -585,13 +595,10 @@ function displayResults() {
         elements.fenStatus.className = 'fen-status invalid';
     }
     
-    // Set Chess.com search links
+    // Set Chess.com links
     const castling = inferCastlingRights();
     const whiteFen = `${state.resultFen} w ${castling} - 0 1`;
     const blackFen = `${state.resultFen} b ${castling} - 0 1`;
-    
-    elements.searchWhiteBtn.href = `${CONFIG.CHESS_COM_SEARCH_URL}?fen=${encodeURIComponent(whiteFen)}`;
-    elements.searchBlackBtn.href = `${CONFIG.CHESS_COM_SEARCH_URL}?fen=${encodeURIComponent(blackFen)}`;
     
     // Set Chess.com analysis links
     elements.analyzeWhiteBtn.href = `${CONFIG.CHESS_COM_ANALYSIS_URL}?fen=${encodeURIComponent(whiteFen)}&flip=false&tab=analysis`;
@@ -601,10 +608,8 @@ function displayResults() {
     elements.playWhiteBtn.href = `${CONFIG.CHESS_COM_PLAY_URL}?fen=${encodeURIComponent(whiteFen)}&flip=false&tab=play`;
     elements.playBlackBtn.href = `${CONFIG.CHESS_COM_PLAY_URL}?fen=${encodeURIComponent(blackFen)}&flip=true&tab=play`;
     
-    // Reset games check results
-    elements.gamesResults.hidden = true;
-    elements.whiteGamesResult.innerHTML = '';
-    elements.blackGamesResult.innerHTML = '';
+    // Auto-check for games
+    checkForGames();
     
     // Update edit UI
     updateEditUI();
@@ -623,6 +628,12 @@ function renderBoard() {
         return;
     }
     
+    // Build a set of questionable square names for quick lookup
+    const questionableSquares = new Set();
+    if (state.questionableSquares) {
+        state.questionableSquares.forEach(q => questionableSquares.add(q.square));
+    }
+    
     for (let row = 0; row < 8; row++) {
         const tr = document.createElement('tr');
         for (let col = 0; col < 8; col++) {
@@ -636,11 +647,20 @@ function renderBoard() {
                 td.textContent = CONFIG.PIECE_UNICODE[piece] || '';
             }
             
+            // Check if this square is questionable (potential color confusion)
+            const squareName = `${'abcdefgh'[col]}${8-row}`;
+            if (questionableSquares.has(squareName)) {
+                td.classList.add('questionable');
+                const qInfo = state.questionableSquares.find(q => q.square === squareName);
+                td.title = qInfo?.reason || 'Questionable piece color';
+            }
             // Highlight low-confidence predictions (< 90%)
-            const confidence = state.confidences?.[row]?.[col];
-            if (confidence !== undefined && confidence < 0.90 && piece !== 'empty') {
-                td.classList.add('low-confidence');
-                td.title = `Confidence: ${(confidence * 100).toFixed(0)}%`;
+            else {
+                const confidence = state.confidences?.[row]?.[col];
+                if (confidence !== undefined && confidence < 0.90 && piece !== 'empty') {
+                    td.classList.add('low-confidence');
+                    td.title = `Confidence: ${(confidence * 100).toFixed(0)}%`;
+                }
             }
             
             // Mark edited squares
@@ -723,11 +743,77 @@ function inferCastlingRights() {
 // UI Helpers
 // ============================================
 
+// Progress animation state
+let progressInterval = null;
+const PROGRESS_STAGES = ['detect', 'warp', 'classify', 'validate'];
+const STAGE_TIMINGS = [800, 1200, 2500, 500]; // Estimated time for each stage in ms
+
+function startProgressAnimation() {
+    stopProgressAnimation();
+    
+    const stages = document.querySelectorAll('#progressStages .stage');
+    let currentStage = 0;
+    
+    // Reset all stages
+    stages.forEach(s => {
+        s.classList.remove('active', 'done');
+    });
+    
+    // Start with first stage active
+    if (stages[0]) stages[0].classList.add('active');
+    
+    let elapsed = 0;
+    progressInterval = setInterval(() => {
+        elapsed += 100;
+        
+        // Check if we should move to next stage
+        let totalTime = 0;
+        for (let i = 0; i <= currentStage && i < STAGE_TIMINGS.length; i++) {
+            totalTime += STAGE_TIMINGS[i];
+        }
+        
+        if (elapsed > totalTime && currentStage < stages.length - 1) {
+            // Mark current as done
+            stages[currentStage].classList.remove('active');
+            stages[currentStage].classList.add('done');
+            
+            // Move to next
+            currentStage++;
+            stages[currentStage].classList.add('active');
+            
+            // Update status text
+            const statusEl = document.getElementById('loadingStatus');
+            if (statusEl) {
+                const statusTexts = [
+                    'Detecting board...',
+                    'Warping to square...',
+                    'Classifying pieces...',
+                    'Validating position...'
+                ];
+                statusEl.textContent = statusTexts[currentStage] || 'Analyzing...';
+            }
+        }
+    }, 100);
+}
+
+function stopProgressAnimation() {
+    if (progressInterval) {
+        clearInterval(progressInterval);
+        progressInterval = null;
+    }
+}
+
 function showSection(section) {
     elements.inputSection.hidden = section !== 'input';
     elements.loadingSection.hidden = section !== 'loading';
     elements.resultsSection.hidden = section !== 'results';
     elements.errorSection.hidden = section !== 'error';
+    
+    if (section === 'loading') {
+        startProgressAnimation();
+    } else {
+        stopProgressAnimation();
+    }
     
     if (section === 'input') {
         elements.inputSection.hidden = false;
@@ -849,8 +935,38 @@ function handleSquareClick(row, col) {
     // Recalculate FEN
     state.resultFen = boardToFen(state.board);
     
-    // Re-render
-    displayResults();
+    // Update UI (but don't call full displayResults to avoid re-rendering everything)
+    elements.fenInput.value = state.resultFen;
+    
+    // Validate FEN
+    const validation = validateFen(state.resultFen);
+    if (validation.isValid) {
+        elements.fenStatus.textContent = '✓ Valid FEN';
+        elements.fenStatus.className = 'fen-status valid';
+    } else {
+        elements.fenStatus.textContent = `⚠ ${validation.issues[0] || 'Invalid FEN'}`;
+        elements.fenStatus.className = 'fen-status invalid';
+    }
+    
+    // Update Chess.com links
+    const castling = inferCastlingRights();
+    const whiteFen = `${state.resultFen} w ${castling} - 0 1`;
+    const blackFen = `${state.resultFen} b ${castling} - 0 1`;
+    elements.analyzeWhiteBtn.href = `${CONFIG.CHESS_COM_ANALYSIS_URL}?fen=${encodeURIComponent(whiteFen)}&flip=false&tab=analysis`;
+    elements.analyzeBlackBtn.href = `${CONFIG.CHESS_COM_ANALYSIS_URL}?fen=${encodeURIComponent(blackFen)}&flip=true&tab=analysis`;
+    elements.playWhiteBtn.href = `${CONFIG.CHESS_COM_PLAY_URL}?fen=${encodeURIComponent(whiteFen)}&flip=false&tab=play`;
+    elements.playBlackBtn.href = `${CONFIG.CHESS_COM_PLAY_URL}?fen=${encodeURIComponent(blackFen)}&flip=true&tab=play`;
+    
+    // Re-render board only
+    renderBoard();
+    
+    // Update edit UI
+    updateEditUI();
+    
+    // Reset game search results (user can click Search button)
+    if (elements.gamesCheckStatus) elements.gamesCheckStatus.hidden = true;
+    if (elements.gamesFoundIcons) elements.gamesFoundIcons.hidden = true;
+    if (elements.noGamesFound) elements.noGamesFound.hidden = true;
 }
 
 function resetBoard() {
@@ -979,34 +1095,97 @@ async function submitCorrections() {
 // ============================================
 
 async function checkForGames() {
-    if (!state.resultFen) return;
+    if (!state.resultFen) {
+        console.log('checkForGames: No resultFen, skipping');
+        return;
+    }
     
-    elements.checkGamesBtn.disabled = true;
-    elements.checkGamesBtn.textContent = '⏳ Checking...';
-    elements.gamesResults.hidden = false;
-    elements.whiteGamesResult.innerHTML = '<span class="checking">Checking white...</span>';
-    elements.blackGamesResult.innerHTML = '<span class="checking">Checking black...</span>';
+    console.log('checkForGames: Starting check for FEN:', state.resultFen);
     
     const castling = inferCastlingRights();
+    const whiteFen = `${state.resultFen} w ${castling} - 0 1`;
+    const blackFen = `${state.resultFen} b ${castling} - 0 1`;
+    
+    // Show checking state
+    if (elements.gamesCheckStatus) {
+        elements.gamesCheckStatus.hidden = false;
+    }
+    if (elements.gamesFoundIcons) {
+        elements.gamesFoundIcons.hidden = true;
+    }
+    if (elements.noGamesFound) {
+        elements.noGamesFound.hidden = true;
+    }
+    if (elements.whiteGameIcon) {
+        elements.whiteGameIcon.style.display = 'none';
+    }
+    if (elements.blackGameIcon) {
+        elements.blackGameIcon.style.display = 'none';
+    }
+    
+    // Set hrefs
+    if (elements.whiteGameIcon) {
+        elements.whiteGameIcon.href = `${CONFIG.CHESS_COM_SEARCH_URL}?fen=${encodeURIComponent(whiteFen)}`;
+    }
+    if (elements.blackGameIcon) {
+        elements.blackGameIcon.href = `${CONFIG.CHESS_COM_SEARCH_URL}?fen=${encodeURIComponent(blackFen)}`;
+    }
     
     try {
-        // Check white to move
-        const whiteFen = `${state.resultFen} w ${castling} - 0 1`;
-        const whiteResult = await checkChessCom(whiteFen);
-        displayGameResult(elements.whiteGamesResult, 'w', whiteResult);
+        console.log('checkForGames: Calling API...');
+        const [whiteResult, blackResult] = await Promise.all([
+            checkChessCom(whiteFen),
+            checkChessCom(blackFen)
+        ]);
         
-        // Check black to move
-        const blackFen = `${state.resultFen} b ${castling} - 0 1`;
-        const blackResult = await checkChessCom(blackFen);
-        displayGameResult(elements.blackGamesResult, 'b', blackResult);
+        console.log('checkForGames: API results - white:', whiteResult, 'black:', blackResult);
+        
+        const whiteFound = whiteResult.gamesFound || whiteResult.GamesFound;
+        const blackFound = blackResult.gamesFound || blackResult.GamesFound;
+        
+        console.log('checkForGames: whiteFound:', whiteFound, 'blackFound:', blackFound);
+        
+        // Hide checking status
+        if (elements.gamesCheckStatus) {
+            elements.gamesCheckStatus.hidden = true;
+        }
+        
+        if (whiteFound || blackFound) {
+            // Show icons container and only the icons with results
+            if (elements.gamesFoundIcons) {
+                elements.gamesFoundIcons.hidden = false;
+            }
+            if (elements.whiteGameIcon) {
+                elements.whiteGameIcon.style.display = whiteFound ? 'flex' : 'none';
+            }
+            if (elements.blackGameIcon) {
+                elements.blackGameIcon.style.display = blackFound ? 'flex' : 'none';
+            }
+            if (elements.noGamesFound) {
+                elements.noGamesFound.hidden = true;
+            }
+        } else {
+            // No games found
+            if (elements.gamesFoundIcons) {
+                elements.gamesFoundIcons.hidden = true;
+            }
+            if (elements.noGamesFound) {
+                elements.noGamesFound.hidden = false;
+            }
+        }
         
     } catch (error) {
-        console.error('Check games error:', error);
-        elements.whiteGamesResult.innerHTML = '<span class="error">Error checking</span>';
-        elements.blackGamesResult.innerHTML = '<span class="error">Error checking</span>';
-    } finally {
-        elements.checkGamesBtn.disabled = false;
-        elements.checkGamesBtn.textContent = '🔍 Check for Games';
+        console.error('checkForGames error:', error);
+        if (elements.gamesCheckStatus) {
+            elements.gamesCheckStatus.hidden = true;
+        }
+        if (elements.noGamesFound) {
+            elements.noGamesFound.hidden = false;
+            const span = elements.noGamesFound.querySelector('span');
+            if (span) {
+                span.textContent = 'Error checking games';
+            }
+        }
     }
 }
 
@@ -1019,19 +1198,4 @@ async function checkChessCom(fen) {
     }
     
     return await response.json();
-}
-
-function displayGameResult(element, side, result) {
-    const sideLabel = side === 'w' ? '⬜ White' : '⬛ Black';
-    
-    if (result.gamesFound || result.GamesFound) {
-        element.innerHTML = `<span class="found">✅ ${sideLabel}: Games found!</span>`;
-        element.classList.add('found');
-        element.classList.remove('not-found');
-    } else {
-        const message = result.message || result.Message || 'No games found';
-        element.innerHTML = `<span class="not-found">❌ ${sideLabel}: ${message}</span>`;
-        element.classList.add('not-found');
-        element.classList.remove('found');
-    }
 }

@@ -30,3 +30,6 @@ obj/
 .vscode/
 .DS_Store
 Thumbs.db
+
+# Noise
+server-pids.json
