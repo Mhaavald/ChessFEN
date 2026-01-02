@@ -223,6 +223,32 @@
                             </div>
                         </div>
                         
+                        <!-- Analyze on Chess.com -->
+                        <div class="mb-3">
+                            <label class="form-label fw-bold">♟️ Analyze on Chess.com:</label>
+                            <div class="d-flex gap-2 flex-wrap align-items-center">
+                                <a href="@GetChessComAnalysisUrl("w")" target="_blank" class="btn btn-primary btn-sm">
+                                    ♔ White to move
+                                </a>
+                                <a href="@GetChessComAnalysisUrl("b")" target="_blank" class="btn btn-primary btn-sm">
+                                    ♚ Black to move
+                                </a>
+                            </div>
+                        </div>
+                        
+                        <!-- Play vs Computer -->
+                        <div class="mb-3">
+                            <label class="form-label fw-bold">🎮 Play vs Computer on Chess.com:</label>
+                            <div class="d-flex gap-2 flex-wrap align-items-center">
+                                <a href="@GetChessComPlayUrl("w")" target="_blank" class="btn btn-outline-success btn-sm">
+                                    ♔ Play as White
+                                </a>
+                                <a href="@GetChessComPlayUrl("b")" target="_blank" class="btn btn-outline-success btn-sm">
+                                    ♚ Play as Black
+                                </a>
+                            </div>
+                        </div>
+                        
                         <!-- Search Games -->
                         <div class="mb-3">
                             <label class="form-label fw-bold">🔍 Find Games with this Position:</label>
@@ -953,9 +979,7 @@
         // Draw the cropped region
         ctx.drawImage(video, sx, sy, size, size, 0, 0, 512, 512);
         
-        // Full preprocessing: contrast, black/white adjustment, sharpen
-        enhanceContrast(ctx, 512, 512);
-        sharpenImage(ctx, 512, 512, 0.5);
+        // No client-side preprocessing - all preprocessing is done server-side for consistency
         
         // Get base64 image
         const base64 = canvas.toDataURL('image/jpeg', 0.92).split(',')[1];
@@ -1016,9 +1040,7 @@
         // Draw the cropped region
         ctx.drawImage(video, sx, sy, size, size, 0, 0, 512, 512);
         
-        // Full preprocessing: contrast, black/white adjustment, sharpen
-        enhanceContrast(ctx, 512, 512);
-        sharpenImage(ctx, 512, 512, 0.5);
+        // No client-side preprocessing - all preprocessing is done server-side for consistency
         
         // Get base64 image
         const base64 = canvas.toDataURL('image/jpeg', 0.92).split(',')[1];
@@ -1695,6 +1717,26 @@
         
         var encodedFen = Uri.EscapeDataString(fullFen);
         return $"https://www.chess.com/games/search?fen={encodedFen}";
+    }
+    
+    private string GetChessComAnalysisUrl(string sideToMove)
+    {
+        var fullFen = GetFullFen(sideToMove);
+        if (string.IsNullOrEmpty(fullFen)) return "#";
+        
+        var encodedFen = Uri.EscapeDataString(fullFen);
+        var flip = sideToMove == "b" ? "true" : "false";
+        return $"https://www.chess.com/analysis?fen={encodedFen}&flip={flip}&tab=analysis";
+    }
+    
+    private string GetChessComPlayUrl(string sideToMove)
+    {
+        var fullFen = GetFullFen(sideToMove);
+        if (string.IsNullOrEmpty(fullFen)) return "#";
+        
+        var encodedFen = Uri.EscapeDataString(fullFen);
+        var flip = sideToMove == "b" ? "true" : "false";
+        return $"https://www.chess.com/analysis?fen={encodedFen}&flip={flip}&tab=play";
     }
     
     private string GetLichessSearchUrl(string sideToMove)

@@ -57,9 +57,13 @@ def extract_batch(
             fail += 1
             continue
         
+        # Convert to grayscale (then back to 3-channel for consistent processing)
+        gray = cv2.cvtColor(board, cv2.COLOR_BGR2GRAY)
+        board = cv2.cvtColor(gray, cv2.COLOR_GRAY2BGR)
+        
         try:
-            # Extract squares
-            squares, sq_size = split_board_to_squares(board, do_autocrop=True)
+            # Extract squares (no autocrop - warped boards are already clean)
+            squares, sq_size = split_board_to_squares(board, do_autocrop=False)
             
             # Write all 64 squares
             write_squares(squares, board_out_dir, board_name)

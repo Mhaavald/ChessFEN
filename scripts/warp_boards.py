@@ -18,6 +18,8 @@ def warp_boards(
     out_dir: Path,
     out_size: int = 640,
     overwrite: bool = False,
+    crop_ratio: float = 1.0,  # Use full image by default (no center crop)
+    board_only: bool = False,  # If True, skip detection - images are already just the board
 ):
     in_dir = in_dir.resolve()
     out_dir = out_dir.resolve()
@@ -53,7 +55,15 @@ def warp_boards(
             cv2.imshow(f"Processing: {img_path.name}", img)
             cv2.waitKey(1)  # Brief pause to display
 
-        quad = detect_board_quad_grid_aware(img)
+        if board_only:
+            # Image is already the board - just resize to square
+            warped = cv2.resize(img, (out_size, out_size), interpolation=cv2.INTER_AREA)
+            cv2.imwrite(str(out_path), warped)
+            print(f"✅ Resized (board only): {img_path.name} → {out_path.name}")
+            ok += 1
+            continue
+
+        quad = detect_board_quad_grid_aware(img, crop_ratio=crop_ratio)
         if quad is None:
             print(f"❌ Board not detected: {img_path.name}")
             fail += 1
@@ -73,19 +83,19 @@ def warp_boards(
 
 
 if __name__ == "__main__":
-    if len(sys.argv) < 3:
-        print("Usage:")
-        print("  python scripts/warp_boards.py <in_dir> <out_dir> [out_size]")
-        print("")
-        print("Example:")
-        print("  python scripts/warp_boards.py data/raw/batch_001 data/boards_warped/batch_001")
-        raise SystemExit(1)
-
-    in_dir = Path(sys.argv[1])
-    out_dir = Path(sys.argv[2])
-    out_size = int(sys.argv[3]) if len(sys.argv) >= 4 else 640
-
-    if not in_dir.exists():
-        raise FileNotFoundError(in_dir)
-
-    warp_boards(in_dir, out_dir, out_size=out_size)
+    import argparse
+    
+    parser = argparse.ArgumentParser(description="Warp chess board images to square")
+    parser.add_argument("in_dir", type=Path, help="Input directory with raw images")
+    parser.add_argument("out_dir", type=Path, help="Output directory for warped boards")
+    parser.add_argument("--size", type=int, default=640, help="Output size (default: 640)")
+    parser.add_argument("--board-only", action="store_true", help="Skip detection - images are already just the board")
+    parser.add_argument("--overwrite", action="store_true", help="Overwrite existing files")
+    
+    args = parser.parse_args()
+    
+    if not args.in_dir.exists():
+        raise FileNotFoundError(args.in_dir)
+    
+    warp_boards(args.in_dir, args.out_dir, out_size=args.size, 
+                overwrite=args.overwrite, board_only=args.board_only)

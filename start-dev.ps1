@@ -28,35 +28,45 @@ Start-Process -FilePath "python" -ArgumentList "src\inference\inference_service.
 # Wait for service to start
 Start-Sleep -Seconds 3
 
-# Start .NET API
-Write-Host "`nStarting .NET API on port 5001..." -ForegroundColor Yellow
+# Start .NET API with HTTPS for mobile camera support
+Write-Host "`nStarting .NET API on port 5001 (HTTPS: 5002)..." -ForegroundColor Yellow
 Push-Location "web\ChessFEN.Api\ChessFEN.Api"
-Start-Process -FilePath "dotnet" -ArgumentList "run", "--urls=http://localhost:5001" -NoNewWindow
+Start-Process -FilePath "dotnet" -ArgumentList "run", "--urls=https://0.0.0.0:5002;http://0.0.0.0:5001" -NoNewWindow
 Pop-Location
 
 # Wait for API to start
 Start-Sleep -Seconds 3
 
 # Start Blazor Web with HTTPS for camera support on mobile
-Write-Host "`nStarting Blazor Web frontend on port 5002 (HTTPS: 5003)..." -ForegroundColor Yellow
+Write-Host "`nStarting Blazor Web frontend on port 5003 (HTTPS: 5004)..." -ForegroundColor Yellow
 Push-Location "web\ChessFEN.Web\ChessFEN.Web"
 # Use 0.0.0.0 to allow connections from other devices on the network
-Start-Process -FilePath "dotnet" -ArgumentList "run", "--urls=https://0.0.0.0:5003;http://0.0.0.0:5002" -NoNewWindow
+Start-Process -FilePath "dotnet" -ArgumentList "run", "--urls=https://0.0.0.0:5004;http://0.0.0.0:5003" -NoNewWindow
 Pop-Location
+
+# Wait for Blazor to start
+Start-Sleep -Seconds 3
+
+# Start static client (lightweight end-user UI)
+Write-Host "`nStarting Client UI on port 5005 (HTTPS: 5006)..." -ForegroundColor Yellow
+Start-Process -FilePath "python" -ArgumentList "web\ChessFEN.Client\serve.py", "5005" -NoNewWindow
+Start-Process -FilePath "python" -ArgumentList "web\ChessFEN.Client\serve_https.py", "5006" -NoNewWindow
 
 # Get local IP for mobile access
 $localIP = (Get-NetIPAddress -AddressFamily IPv4 | Where-Object { $_.InterfaceAlias -notmatch "Loopback" -and $_.IPAddress -notmatch "^169" } | Select-Object -First 1).IPAddress
 
 Write-Host "`n=== All services started ===" -ForegroundColor Green
 Write-Host "  Python Inference: http://localhost:5000" -ForegroundColor Cyan
-Write-Host "  .NET API:         http://localhost:5001/swagger" -ForegroundColor Cyan
-Write-Host "  Web Frontend:     http://localhost:5002 (HTTP)" -ForegroundColor Cyan
-Write-Host "  Web Frontend:     https://localhost:5003 (HTTPS)" -ForegroundColor Green
+Write-Host "  .NET API:         http://localhost:5001 | https://localhost:5002" -ForegroundColor Cyan
+Write-Host "  Blazor Frontend:  http://localhost:5003 | https://localhost:5004" -ForegroundColor Cyan
+Write-Host "  Client UI:        http://localhost:5005 | https://localhost:5006" -ForegroundColor Green
 if ($localIP) {
-    Write-Host "`n  Mobile access (HTTPS): https://${localIP}:5003" -ForegroundColor Magenta
+    Write-Host "`n  Mobile access:" -ForegroundColor Magenta
+    Write-Host "    Client UI: https://${localIP}:5006" -ForegroundColor Green
+    Write-Host "    Blazor:    https://${localIP}:5004" -ForegroundColor Cyan
     Write-Host "  (Accept certificate warning on phone)" -ForegroundColor Yellow
 }
-Write-Host "`nFor mobile camera access, use HTTPS URL" -ForegroundColor Yellow
+Write-Host "`nFor mobile camera access, use HTTPS URLs" -ForegroundColor Yellow
 Write-Host "Press Ctrl+C to stop all services" -ForegroundColor Yellow
 
 # Keep script running

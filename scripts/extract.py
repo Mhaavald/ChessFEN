@@ -131,8 +131,6 @@ def draw_grid_overlay(
     Draws an 8x8 grid + a8..h1 labels on top of a warped (square) board image.
     """
     img = board_bgr.copy()
-    h, w = img.shape[:2]
-    s = min(h, w)
     img = make_square(img)
 
     # resize to match sq_size exactly

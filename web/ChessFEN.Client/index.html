@@ -1,0 +1,234 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>Chess FEN Scanner</title>
+    <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>♔</text></svg>">
+    <link rel="stylesheet" href="styles.css?v=6">
+</head>
+<body>
+    <div class="app">
+        <!-- Header -->
+        <header class="header">
+            <h1>♔ Chess FEN Scanner</h1>
+            <p class="subtitle">Scan a chess position, get the FEN, find games</p>
+        </header>
+
+        <!-- Main Content -->
+        <main class="main">
+            <!-- Step 1: Image Input -->
+            <section class="card" id="inputSection">
+                <h2>1. Capture or Upload Board Image</h2>
+                
+                <div class="input-options">
+                    <button class="btn btn-primary btn-large" id="cameraBtn">
+                        📸 Open Camera
+                    </button>
+                    <span class="or-divider">or</span>
+                    <label class="btn btn-secondary btn-large file-label">
+                        📁 Choose File
+                        <input type="file" id="fileInput" accept="image/*" hidden>
+                    </label>
+                </div>
+
+                <!-- Image Preview -->
+                <div class="preview-container" id="previewContainer" hidden>
+                    <img id="previewImage" alt="Board preview">
+                    <button class="btn btn-icon btn-clear" id="clearBtn" title="Clear">✕</button>
+                </div>
+
+                <!-- Options -->
+                <div class="options" id="optionsPanel" hidden>
+                    <label class="checkbox-label">
+                        <input type="checkbox" id="skipDetection">
+                        <span>Image is board only (skip detection)</span>
+                    </label>
+                    <div class="model-select">
+                        <label for="modelSelect">Model:</label>
+                        <select id="modelSelect">
+                            <option value="">Default (ResNet18)</option>
+                        </select>
+                    </div>
+                </div>
+
+                <!-- Analyze Buttons -->
+                <div class="analyze-buttons">
+                    <button class="btn btn-success btn-large" id="analyzeBtn" disabled>
+                        🔍 Quick Analyze
+                    </button>
+                    <button class="btn btn-primary btn-large" id="deepAnalyzeBtn" disabled>
+                        🔬 Deep Analysis
+                    </button>
+                </div>
+                <p class="hint">Deep Analysis uses all models and checks Chess.com for games</p>
+            </section>
+
+            <!-- Loading State -->
+            <section class="card loading-card" id="loadingSection" hidden>
+                <div class="spinner"></div>
+                <p>Analyzing board...</p>
+            </section>
+
+            <!-- Step 2: Results -->
+            <section class="card" id="resultsSection" hidden>
+                <h2>2. Results</h2>
+
+                <!-- Captured Board Image -->
+                <div class="captured-board-container" id="capturedBoardContainer" hidden>
+                    <h3>📸 Captured Board</h3>
+                    <img id="capturedBoardImage" alt="Captured board" class="captured-board-image">
+                </div>
+
+                <!-- Board Display -->
+                <div class="board-container">
+                    <table class="chess-board" id="chessBoard"></table>
+                    <div class="board-actions">
+                        <button class="btn btn-sm btn-outline" id="editBoardBtn" title="Edit position">✏️ Edit</button>
+                        <button class="btn btn-sm btn-outline" id="resetBoardBtn" title="Reset to original" hidden>↩️ Reset</button>
+                    </div>
+                </div>
+
+                <!-- Piece Palette (for editing) -->
+                <div class="piece-palette" id="piecePalette" hidden>
+                    <div class="palette-row">
+                        <span class="palette-piece" data-piece="wK">♔</span>
+                        <span class="palette-piece" data-piece="wQ">♕</span>
+                        <span class="palette-piece" data-piece="wR">♖</span>
+                        <span class="palette-piece" data-piece="wB">♗</span>
+                        <span class="palette-piece" data-piece="wN">♘</span>
+                        <span class="palette-piece" data-piece="wP">♙</span>
+                    </div>
+                    <div class="palette-row">
+                        <span class="palette-piece" data-piece="bK">♚</span>
+                        <span class="palette-piece" data-piece="bQ">♛</span>
+                        <span class="palette-piece" data-piece="bR">♜</span>
+                        <span class="palette-piece" data-piece="bB">♝</span>
+                        <span class="palette-piece" data-piece="bN">♞</span>
+                        <span class="palette-piece" data-piece="bP">♟</span>
+                    </div>
+                    <div class="palette-row">
+                        <span class="palette-piece selected" data-piece="empty">⬜</span>
+                        <span class="palette-hint">Click piece, then click square</span>
+                    </div>
+                </div>
+
+                <!-- Correction Notice -->
+                <div class="correction-notice" id="correctionNotice" hidden>
+                    <span class="correction-text">📝 <span id="correctionCount">0</span> corrections made</span>
+                    <button class="btn btn-sm btn-success" id="submitCorrectionsBtn">✅ Submit for Training</button>
+                </div>
+
+                <!-- Deep Analysis Results -->
+                <div class="deep-analysis-results" id="deepAnalysisResults" hidden>
+                    <h3>🔬 Deep Analysis Results</h3>
+                    <div class="consensus-status" id="consensusStatus"></div>
+                    <div class="games-status" id="gamesStatus"></div>
+                    <div class="model-results" id="modelResultsList"></div>
+                    <div class="disagreements" id="disagreementsList"></div>
+                </div>
+
+                <!-- FEN Display -->
+                <div class="fen-container">
+                    <div class="fen-status" id="fenStatus"></div>
+                    <div class="fen-display">
+                        <input type="text" id="fenInput" readonly>
+                        <button class="btn btn-icon" id="copyFenBtn" title="Copy FEN">📋</button>
+                    </div>
+                </div>
+
+                <!-- Analyze on Chess.com -->
+                <div class="search-section">
+                    <h3>♟️ Analyze on Chess.com</h3>
+                    <div class="search-buttons">
+                        <a class="btn btn-analyze" id="analyzeWhiteBtn" target="_blank">
+                            ⬜ White to Move
+                        </a>
+                        <a class="btn btn-analyze" id="analyzeBlackBtn" target="_blank">
+                            ⬛ Black to Move
+                        </a>
+                    </div>
+                </div>
+
+                <!-- Play on Chess.com -->
+                <div class="search-section">
+                    <h3>🎮 Play vs Computer on Chess.com</h3>
+                    <div class="search-buttons">
+                        <a class="btn btn-play" id="playWhiteBtn" target="_blank">
+                            ⬜ Play as White
+                        </a>
+                        <a class="btn btn-play" id="playBlackBtn" target="_blank">
+                            ⬛ Play as Black
+                        </a>
+                    </div>
+                </div>
+
+                <!-- Chess.com Search -->
+                <div class="search-section">
+                    <h3>🔍 Find Games on Chess.com</h3>
+                    <div class="search-buttons">
+                        <a class="btn btn-chess-com" id="searchWhiteBtn" target="_blank">
+                            ⬜ White to Move
+                        </a>
+                        <a class="btn btn-chess-com" id="searchBlackBtn" target="_blank">
+                            ⬛ Black to Move
+                        </a>
+                    </div>
+                    <div class="check-games-row">
+                        <button class="btn btn-primary" id="checkGamesBtn">
+                            🔍 Check for Games
+                        </button>
+                        <span class="check-games-hint">Check if any games exist</span>
+                    </div>
+                    <div class="games-results" id="gamesResults" hidden>
+                        <div class="games-result" id="whiteGamesResult"></div>
+                        <div class="games-result" id="blackGamesResult"></div>
+                    </div>
+                </div>
+
+                <!-- Actions -->
+                <div class="result-actions">
+                    <button class="btn btn-secondary" id="newScanBtn">
+                        🔄 New Scan
+                    </button>
+                </div>
+            </section>
+
+            <!-- Error State -->
+            <section class="card error-card" id="errorSection" hidden>
+                <div class="error-icon">⚠️</div>
+                <p id="errorMessage">An error occurred</p>
+                <button class="btn btn-secondary" id="retryBtn">Try Again</button>
+            </section>
+        </main>
+
+        <!-- Camera Modal -->
+        <div class="modal" id="cameraModal" hidden>
+            <div class="modal-content">
+                <div class="modal-header">
+                    <h3>📸 Capture Chess Board</h3>
+                    <button class="btn btn-icon modal-close" id="closeCameraBtn">✕</button>
+                </div>
+                <div class="camera-container">
+                    <video id="cameraVideo" autoplay playsinline muted></video>
+                    <div class="camera-guide">
+                        <div class="guide-square"></div>
+                        <div class="guide-text">Align board here</div>
+                    </div>
+                </div>
+                <div class="camera-status" id="cameraStatus">Initializing camera...</div>
+                <div class="camera-controls">
+                    <button class="btn btn-secondary" id="switchCameraBtn">🔄 Switch</button>
+                    <button class="btn btn-success btn-large" id="captureBtn" disabled>📷 Capture</button>
+                </div>
+            </div>
+        </div>
+
+        <!-- Toast Notification -->
+        <div class="toast" id="toast" hidden></div>
+    </div>
+
+    <script src="config.js?v=6"></script>
+    <script src="app.js?v=6"></script>
+</body>
+</html>

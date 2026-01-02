@@ -1,6 +1,6 @@
 $im = "C:\Program Files\ImageMagick-6.9.13-Q16-HDRI\convert.exe"
-$source = "C:\Users\mortenha\source\repos\Chess\ChessFEN\data\raw\batch_005"
-$dest = "C:\Users\mortenha\source\repos\Chess\ChessFEN\data\raw\batch_005"
+$source = "C:\Users\mortenha\OneDrive - Microsoft\Pictures\Chess\31122025"
+$dest = "C:\Users\mortenha\source\repos\Chess\ChessFEN\data\raw\batch_007"
 
 New-Item -ItemType Directory -Path $dest -Force | Out-Null
 

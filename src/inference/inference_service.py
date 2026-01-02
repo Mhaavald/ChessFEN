@@ -48,6 +48,10 @@ MODELS_DIR = REPO_ROOT / "models"
 FEEDBACK_DIR = REPO_ROOT / "data" / "user_feedback"
 MODEL_VERSIONS_FILE = MODELS_DIR / "versions.json"
 
+# Warped board resolution - use 640 for 80x80 tiles to match training data
+WARP_SIZE = 640
+TILE_SIZE = WARP_SIZE // 8  # 80px tiles
+
 IMG_SIZE = 64
 CLASSES = [
     "empty",
@@ -207,9 +211,347 @@ transform = transforms.Compose([
 ])
 
 
+def preprocess_image(img_bgr, apply_grayscale=True):
+    """
+    Preprocess input image for consistent results across all clients.
+    
+    Args:
+        img_bgr: Input image in BGR format
+        apply_grayscale: If True, convert to grayscale (enabled by default as
+                        training data is grayscale)
+    
+    Applies:
+    1. Grayscale conversion (required - training data is grayscale)
+    2. Auto-levels (histogram stretch)
+    3. Contrast enhancement (1.3x)
+    
+    This centralizes preprocessing so all UIs get the same results.
+    """
+    if not apply_grayscale:
+        # Return original color image - NOT RECOMMENDED, training data is grayscale
+        return img_bgr
+    
+    # Step 1: Convert to grayscale
+    gray = cv2.cvtColor(img_bgr, cv2.COLOR_BGR2GRAY)
+    
+    # Step 2: Auto-levels (histogram stretch)
+    min_val = gray.min()
+    max_val = gray.max()
+    if max_val > min_val:
+        gray = ((gray.astype(np.float32) - min_val) / (max_val - min_val) * 255.0)
+    
+    # Step 3: Contrast enhancement (1.3x around midpoint)
+    contrast_factor = 1.3
+    gray = 128 + (gray - 128) * contrast_factor
+    gray = np.clip(gray, 0, 255).astype(np.uint8)
+    
+    # Convert back to 3-channel BGR for model compatibility
+    img_out = cv2.cvtColor(gray, cv2.COLOR_GRAY2BGR)
+    
+    return img_out
+
+
 # ============================
 # Inference Logic
 # ============================
+
+# Offset search configuration
+OFFSET_SEARCH_CONFIDENCE_BOOST = 0.15  # If offset gives 15%+ higher confidence, prefer it
+OFFSET_PERCENTAGES = [-0.20, -0.15, -0.10, -0.05, 0, 0.05, 0.10, 0.15, 0.20]
+
+
+def predict_tile_with_offset_search(warped, row, col, tile_size, model):
+    """
+    Predict a single tile, always trying offset positions to find best alignment.
+    
+    This compensates for lens distortion and perspective errors that cause
+    misalignment between the detected grid and actual square boundaries.
+    
+    The function first gets the baseline prediction, then only searches offsets
+    if the baseline confidence is below a threshold OR if the top-2 predictions
+    are close (indicating confusion).
+    
+    Returns:
+        piece: predicted piece class
+        confidence: confidence score
+        used_offset: (dx_pct, dy_pct) offset used, or (0, 0) if baseline was used
+    """
+    h, w = warped.shape[:2]
+    base_y = row * tile_size
+    base_x = col * tile_size
+    
+    # First, get baseline prediction (no offset)
+    y1, y2 = base_y, base_y + tile_size
+    x1, x2 = base_x, base_x + tile_size
+    
+    tile = warped[y1:y2, x1:x2]
+    tile_rgb = cv2.cvtColor(tile, cv2.COLOR_BGR2RGB)
+    pil_img = Image.fromarray(tile_rgb)
+    img_tensor = transform(pil_img).unsqueeze(0)
+    
+    with torch.no_grad():
+        outputs = model(img_tensor)
+        probs = torch.softmax(outputs, dim=1)
+        
+        # Get top-2 predictions to check for confusion
+        top2_probs, top2_indices = torch.topk(probs[0], 2)
+        baseline_conf = top2_probs[0].item()
+        second_conf = top2_probs[1].item()
+        baseline_piece = CLASSES[top2_indices[0].item()]
+    
+    # Decide if we need offset search:
+    # 1. Low confidence (< 85%)
+    # 2. Top-2 are close (within 20% of each other) - indicates confusion
+    confidence_gap = baseline_conf - second_conf
+    needs_offset_search = baseline_conf < 0.85 or confidence_gap < 0.20
+    
+    if not needs_offset_search:
+        # High confidence, clear winner - use baseline
+        return baseline_piece, baseline_conf, (0, 0)
+    
+    # Search offsets for better prediction
+    best_piece = baseline_piece
+    best_conf = baseline_conf
+    best_offset = (0, 0)
+    
+    for dy_pct in OFFSET_PERCENTAGES:
+        for dx_pct in OFFSET_PERCENTAGES:
+            if dy_pct == 0 and dx_pct == 0:
+                continue  # Already have baseline
+            
+            dy = int(dy_pct * tile_size)
+            dx = int(dx_pct * tile_size)
+            
+            oy1 = max(0, base_y + dy)
+            oy2 = min(h, base_y + tile_size + dy)
+            ox1 = max(0, base_x + dx)
+            ox2 = min(w, base_x + tile_size + dx)
+            
+            # Skip if tile would be too small
+            if oy2 - oy1 < tile_size * 0.7 or ox2 - ox1 < tile_size * 0.7:
+                continue
+            
+            tile = warped[oy1:oy2, ox1:ox2]
+            tile_resized = cv2.resize(tile, (tile_size, tile_size))
+            tile_rgb = cv2.cvtColor(tile_resized, cv2.COLOR_BGR2RGB)
+            pil_img = Image.fromarray(tile_rgb)
+            img_tensor = transform(pil_img).unsqueeze(0)
+            
+            with torch.no_grad():
+                outputs = model(img_tensor)
+                probs = torch.softmax(outputs, dim=1)
+                pred_idx = probs.argmax().item()
+                conf = probs[0, pred_idx].item()
+            
+            if conf > best_conf:
+                best_piece = CLASSES[pred_idx]
+                best_conf = conf
+                best_offset = (dx_pct, dy_pct)
+    
+    # Log improvement if offset helped
+    if best_offset != (0, 0) and best_conf > baseline_conf + 0.05:
+        print(f"[OFFSET] Improved: baseline {baseline_piece} {baseline_conf:.1%} → {best_piece} {best_conf:.1%} at offset {best_offset}")
+    
+    return best_piece, best_conf, best_offset
+
+
+def predict_tiles_with_confidence(warped, model, tile_size=64, use_offset_search=True):
+    """
+    Classify all 64 tiles and return predictions with confidence scores.
+    
+    Args:
+        warped: Warped board image
+        model: Classification model
+        tile_size: Size of each tile in pixels
+        use_offset_search: If True, try offset positions for low-confidence tiles
+    
+    Returns:
+        board: 8x8 list of piece names
+        confidences: 8x8 list of confidence values (0-1)
+        avg_confidence: average confidence across all tiles
+        low_conf_count: number of tiles with confidence < 0.5
+    """
+    board = [[None for _ in range(8)] for _ in range(8)]
+    confidences = [[0.0 for _ in range(8)] for _ in range(8)]
+    offsets_used = [[None for _ in range(8)] for _ in range(8)]
+    
+    for row in range(8):
+        for col in range(8):
+            if use_offset_search:
+                # Use offset search for potentially misaligned tiles
+                piece, confidence, offset = predict_tile_with_offset_search(
+                    warped, row, col, tile_size, model
+                )
+                board[row][col] = piece
+                confidences[row][col] = confidence
+                offsets_used[row][col] = offset
+            else:
+                # Original logic - no offset search
+                y1, y2 = row * tile_size, (row + 1) * tile_size
+                x1, x2 = col * tile_size, (col + 1) * tile_size
+                tile = warped[y1:y2, x1:x2]
+                
+                tile_rgb = cv2.cvtColor(tile, cv2.COLOR_BGR2RGB)
+                pil_img = Image.fromarray(tile_rgb)
+                img_tensor = transform(pil_img).unsqueeze(0)
+                
+                with torch.no_grad():
+                    outputs = model(img_tensor)
+                    probs = torch.softmax(outputs, dim=1)
+                    pred_idx = probs.argmax().item()
+                    confidence = probs[0, pred_idx].item()
+                
+                board[row][col] = CLASSES[pred_idx]
+                confidences[row][col] = confidence
+    
+    # Calculate quality metrics
+    all_confs = [confidences[r][c] for r in range(8) for c in range(8)]
+    avg_confidence = sum(all_confs) / len(all_confs)
+    low_conf_count = sum(1 for c in all_confs if c < 0.5)
+    
+    # Log if offset search improved results
+    if use_offset_search:
+        offset_count = sum(1 for r in range(8) for c in range(8) 
+                          if offsets_used[r][c] and offsets_used[r][c] != (0, 0))
+        if offset_count > 0:
+            print(f"[OFFSET] Used offset search for {offset_count} tiles")
+    
+    return board, confidences, avg_confidence, low_conf_count
+
+
+def validate_board_detection(board, confidences, avg_confidence, low_conf_count):
+    """
+    Validate whether the board detection appears correct based on predictions.
+    
+    Returns:
+        is_valid: True if detection seems good
+        reason: explanation if invalid
+    """
+    # Check 1: Average confidence should be reasonable (> 0.6)
+    if avg_confidence < 0.6:
+        return False, f"Low average confidence: {avg_confidence:.2f}"
+    
+    # Check 2: Too many low-confidence tiles (> 20 out of 64)
+    if low_conf_count > 20:
+        return False, f"Too many low-confidence tiles: {low_conf_count}/64"
+    
+    # Check 3: Valid piece distribution (basic sanity)
+    piece_counts = {}
+    for row in range(8):
+        for col in range(8):
+            piece = board[row][col]
+            piece_counts[piece] = piece_counts.get(piece, 0) + 1
+    
+    # A real chess position should have at most 2 kings, 1 per side
+    if piece_counts.get("wK", 0) > 1 or piece_counts.get("bK", 0) > 1:
+        return False, "Too many kings detected"
+    
+    # Should have reasonable number of empty squares (not all empty, not all pieces)
+    empty_count = piece_counts.get("empty", 0)
+    if empty_count > 58:  # Almost all empty
+        return False, "Almost all squares detected as empty"
+    if empty_count < 10:  # Too few empty
+        return False, "Too few empty squares detected"
+    
+    return True, "OK"
+
+
+def detect_board_with_validation(img_bgr, model, debug=False):
+    """
+    Detect board using multiple candidates and validate with model predictions.
+    Returns the best detection that passes validation.
+    
+    Args:
+        img_bgr: Input image in BGR format
+        model: PyTorch model for classification
+        debug: Include debug info
+    
+    Returns:
+        warped: Warped board image (or None if all candidates fail)
+        board: 8x8 piece predictions
+        confidences: 8x8 confidence values
+        avg_confidence: average confidence
+        debug_info: dict with detection details if debug=True
+    """
+    from detect_board import _candidate_quads_from_edges, combined_grid_score
+    
+    debug_info = {} if debug else None
+    
+    # Get all candidate quads
+    candidates = _candidate_quads_from_edges(img_bgr)
+    img_area = img_bgr.shape[0] * img_bgr.shape[1]
+    
+    # Filter and score candidates
+    scored_candidates = []
+    for quad in candidates:
+        area = cv2.contourArea(quad)
+        rel_area = area / img_area
+        if rel_area < 0.20:
+            continue
+        
+        rect = cv2.minAreaRect(quad)
+        (_, _), (bw, bh), _ = rect
+        aspect = max(bw, bh) / (min(bw, bh) + 1e-6)
+        if aspect > 1.15:
+            continue
+        
+        warped = warp_quad(img_bgr, quad, out_size=256)
+        grid_score = combined_grid_score(warped)
+        
+        if grid_score < 0.15:
+            continue
+        
+        scored_candidates.append((grid_score, quad, rel_area))
+    
+    # Sort by grid score (highest first)
+    scored_candidates.sort(key=lambda x: -x[0])
+    
+    if debug:
+        debug_info["num_candidates"] = len(scored_candidates)
+        debug_info["tried_candidates"] = []
+    
+    # Try candidates in order of grid score, validate with model
+    for i, (grid_score, quad, rel_area) in enumerate(scored_candidates[:5]):  # Try up to 5
+        warped = warp_quad(img_bgr, quad, out_size=WARP_SIZE)
+        tile_size = TILE_SIZE
+        
+        board, confidences, avg_confidence, low_conf_count = predict_tiles_with_confidence(
+            warped, model, tile_size
+        )
+        
+        is_valid, reason = validate_board_detection(board, confidences, avg_confidence, low_conf_count)
+        
+        if debug:
+            debug_info["tried_candidates"].append({
+                "index": i,
+                "grid_score": grid_score,
+                "rel_area": rel_area,
+                "avg_confidence": avg_confidence,
+                "low_conf_count": low_conf_count,
+                "is_valid": is_valid,
+                "reason": reason
+            })
+        
+        if is_valid:
+            if debug:
+                debug_info["selected_index"] = i
+            return warped, quad, board, confidences, avg_confidence, debug_info
+    
+    # No valid candidate found, return best one anyway with warning
+    if scored_candidates:
+        best_grid_score, best_quad, _ = scored_candidates[0]
+        warped = warp_quad(img_bgr, best_quad, out_size=WARP_SIZE)
+        tile_size = TILE_SIZE
+        board, confidences, avg_confidence, low_conf_count = predict_tiles_with_confidence(
+            warped, model, tile_size
+        )
+        if debug:
+            debug_info["selected_index"] = 0
+            debug_info["warning"] = "No candidate passed validation, using best grid score"
+        return warped, best_quad, board, confidences, avg_confidence, debug_info
+    
+    return None, None, None, None, None, debug_info
+
 
 def predict_board(img_bgr, model, debug=False, skip_detection=False):
     """
@@ -234,25 +576,34 @@ def predict_board(img_bgr, model, debug=False, skip_detection=False):
     if debug:
         result["debug_images"] = {}
     
+    # Apply consistent preprocessing to all images
+    img_bgr = preprocess_image(img_bgr)
+    
     if skip_detection:
-        # Treat entire image as the board - just resize to 512x512
-        warped = cv2.resize(img_bgr, (512, 512), interpolation=cv2.INTER_AREA)
-        tile_size = 512 // 8
+        # Treat entire image as the board - just resize to WARP_SIZE
+        warped = cv2.resize(img_bgr, (WARP_SIZE, WARP_SIZE), interpolation=cv2.INTER_AREA)
+        tile_size = TILE_SIZE
         
         if debug:
             # No detection overlay when skipping detection
             result["debug_images"]["detection"] = cv2.cvtColor(img_bgr, cv2.COLOR_BGR2RGB)
             result["debug_images"]["warped"] = cv2.cvtColor(warped, cv2.COLOR_BGR2RGB)
+        
+        # Classify tiles
+        board, confidences, avg_confidence, low_conf_count = predict_tiles_with_confidence(
+            warped, model, tile_size
+        )
     else:
-        # Detect board
-        quad = detect_board_quad_grid_aware(img_bgr, crop_ratio=0.80)
-        if quad is None:
+        # Use validated detection (tries multiple candidates)
+        warped, quad, board, confidences, avg_confidence, detection_debug = detect_board_with_validation(
+            img_bgr, model, debug=debug
+        )
+        
+        if warped is None:
             result["error"] = "Could not detect chess board"
             return result
         
-        # Warp board
-        warped = warp_quad(img_bgr, quad, out_size=512)
-        tile_size = 512 // 8
+        tile_size = TILE_SIZE
         
         if debug:
             # Board detection overlay
@@ -261,27 +612,13 @@ def predict_board(img_bgr, model, debug=False, skip_detection=False):
             cv2.polylines(overlay, [pts], True, (0, 255, 0), 3)
             result["debug_images"]["detection"] = cv2.cvtColor(overlay, cv2.COLOR_BGR2RGB)
             result["debug_images"]["warped"] = cv2.cvtColor(warped, cv2.COLOR_BGR2RGB)
+            
+            # Add detection validation info
+            if detection_debug:
+                result["detection_info"] = detection_debug
     
-    # Classify each tile
-    board = [[None for _ in range(8)] for _ in range(8)]
-    
-    with torch.no_grad():
-        for row in range(8):
-            for col in range(8):
-                y1, y2 = row * tile_size, (row + 1) * tile_size
-                x1, x2 = col * tile_size, (col + 1) * tile_size
-                tile = warped[y1:y2, x1:x2]
-                
-                # Convert to PIL for transform
-                tile_rgb = cv2.cvtColor(tile, cv2.COLOR_BGR2RGB)
-                pil_img = Image.fromarray(tile_rgb)
-                img_tensor = transform(pil_img).unsqueeze(0)
-                
-                outputs = model(img_tensor)
-                probs = torch.softmax(outputs, dim=1)
-                pred_idx = probs.argmax().item()
-                
-                board[row][col] = CLASSES[pred_idx]
+    # Add confidence info to result
+    result["avg_confidence"] = avg_confidence
     
     # Generate FEN
     fen_rows = []
@@ -320,6 +657,7 @@ def predict_board(img_bgr, model, debug=False, skip_detection=False):
     result["success"] = True
     result["fen"] = fen
     result["board"] = board
+    result["confidences"] = confidences  # 8x8 array of confidence values
     
     return result
 
@@ -509,6 +847,113 @@ def predict():
     return jsonify(result)
 
 
+@app.route('/api/predict/multi', methods=['POST'])
+def predict_multi():
+    """
+    Run prediction with ALL available models and compare results.
+    
+    Request:
+        - image: base64 encoded image
+        - skip_detection: boolean (optional) - skip board detection
+    
+    Response:
+        - success: boolean
+        - results: list of {model, fen, board, success}
+        - consensus: bool - true if all models agree on FEN
+        - consensus_fen: string - FEN if all agree, null otherwise
+        - disagreements: list of squares where models disagree
+    """
+    skip_detection = request.args.get('skip_detection', 'false').lower() == 'true'
+    
+    print(f"[PREDICT_MULTI] Received request, skip_detection={skip_detection}")
+    
+    # Get image from request
+    img_bgr = None
+    if request.json and 'image' in request.json:
+        img_base64 = request.json['image']
+        if ',' in img_base64 and img_base64.startswith('data:'):
+            img_base64 = img_base64.split(',', 1)[1]
+        try:
+            img_data = base64.b64decode(img_base64)
+            nparr = np.frombuffer(img_data, np.uint8)
+            img_bgr = cv2.imdecode(nparr, cv2.IMREAD_COLOR)
+            if img_bgr is None:
+                pil_img = Image.open(BytesIO(img_data))
+                if pil_img.mode != 'RGB':
+                    pil_img = pil_img.convert('RGB')
+                img_rgb = np.array(pil_img)
+                img_bgr = cv2.cvtColor(img_rgb, cv2.COLOR_RGB2BGR)
+        except Exception as e:
+            return jsonify({"success": False, "error": f"Decode error: {e}"}), 400
+    else:
+        return jsonify({"success": False, "error": "No image provided"}), 400
+    
+    if img_bgr is None:
+        return jsonify({"success": False, "error": "Invalid image"}), 400
+    
+    # Get all available models
+    versions = get_model_versions()
+    results = []
+    
+    for ver in versions:
+        model_name = ver['name']
+        try:
+            model = load_model(model_name)
+            result = predict_board(img_bgr.copy(), model, debug=False, skip_detection=skip_detection)
+            results.append({
+                "model": model_name,
+                "type": ver['type'],
+                "accuracy": ver['accuracy'],
+                "fen": result.get('fen'),
+                "board": result.get('board'),
+                "success": result.get('success', False)
+            })
+        except Exception as e:
+            results.append({
+                "model": model_name,
+                "type": ver['type'],
+                "accuracy": ver['accuracy'],
+                "fen": None,
+                "board": None,
+                "success": False,
+                "error": str(e)
+            })
+    
+    # Check for consensus
+    successful_fens = [r['fen'] for r in results if r['success'] and r['fen']]
+    unique_fens = list(set(successful_fens))
+    
+    consensus = len(unique_fens) == 1 and len(successful_fens) == len(versions)
+    consensus_fen = unique_fens[0] if consensus else None
+    
+    # Find disagreements (if any)
+    disagreements = []
+    if len(unique_fens) > 1:
+        # Compare boards square by square
+        successful_boards = [r['board'] for r in results if r['success'] and r['board']]
+        if len(successful_boards) > 1:
+            files = 'abcdefgh'
+            for row in range(8):
+                for col in range(8):
+                    pieces = set(b[row][col] for b in successful_boards)
+                    if len(pieces) > 1:
+                        square = f"{files[col]}{8-row}"
+                        disagreements.append({
+                            "square": square,
+                            "predictions": {r['model']: r['board'][row][col] for r in results if r['success'] and r['board']}
+                        })
+    
+    return jsonify({
+        "success": True,
+        "results": results,
+        "consensus": consensus,
+        "consensus_fen": consensus_fen,
+        "disagreements": disagreements,
+        "model_count": len(versions),
+        "successful_count": len(successful_fens)
+    })
+
+
 @app.route('/api/feedback', methods=['POST'])
 def submit_feedback():
     """
@@ -521,6 +966,8 @@ def submit_feedback():
         - corrected_squares: dict of {square: piece} corrections
     """
     data = request.json
+    if not data:
+        return jsonify({"error": "No JSON data received"}), 400
     
     feedback_id = save_feedback(
         original_fen=data.get('original_fen'),

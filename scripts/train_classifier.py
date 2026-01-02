@@ -35,9 +35,11 @@ IDX_TO_CLASS = {i: cls for i, cls in enumerate(CLASSES)}
 # Training hyperparameters
 IMG_SIZE = 64
 BATCH_SIZE = 32
-EPOCHS = 30
-LEARNING_RATE = 0.001
+EPOCHS = 50
+LEARNING_RATE = 0.0005  # Lower LR for fine-tuning
 VAL_SPLIT = 0.15
+CONVERGENCE_THRESHOLD = 0.001  # Min improvement to count as progress (0.1%)
+CONVERGENCE_PATIENCE = 5  # Stop after N epochs with < threshold improvement
 
 
 # ============================
@@ -238,6 +240,8 @@ def main(
     batch_size: int = BATCH_SIZE,
     lr: float = LEARNING_RATE,
     model_type: str = "cnn",
+    convergence_threshold: float = CONVERGENCE_THRESHOLD,
+    convergence_patience: int = CONVERGENCE_PATIENCE,
 ):
     data_dir = Path(data_dir)
     output_dir = Path(output_dir)
@@ -313,19 +317,45 @@ def main(
     # Training loop
     best_val_acc = 0.0
     best_epoch = 0
+    prev_val_acc = 0.0
+    stagnant_epochs = 0  # Epochs with improvement below threshold
     
-    print(f"\nTraining for {epochs} epochs...")
-    print("-" * 60)
+    print(f"\nTraining for up to {epochs} epochs...")
+    print(f"  Learning rate: {lr}")
+    print(f"  Convergence: stop if improvement < {convergence_threshold*100:.1f}% for {convergence_patience} epochs")
+    print("-" * 70)
     
     for epoch in range(1, epochs + 1):
         train_loss, train_acc = train_epoch(model, train_loader, criterion, optimizer, device)
         val_loss, val_acc = validate(model, val_loader, criterion, device)
         
+        # Get current learning rate
+        current_lr = optimizer.param_groups[0]['lr']
+        
         scheduler.step(val_loss)
         
+        # Calculate improvement
+        improvement = val_acc - prev_val_acc
+        prev_val_acc = val_acc
+        
+        # Build status string
+        status_parts = []
+        if improvement > convergence_threshold:
+            status_parts.append(f"+{improvement*100:.2f}%")
+            stagnant_epochs = 0
+        elif epoch > 1:  # Don't count first epoch
+            stagnant_epochs += 1
+            status_parts.append(f"stagnant {stagnant_epochs}/{convergence_patience}")
+        
+        # Show if LR was reduced
+        if current_lr < lr:
+            status_parts.append(f"lr={current_lr:.6f}")
+        
+        status = f" [{', '.join(status_parts)}]" if status_parts else ""
+        
         print(f"Epoch {epoch:3d}/{epochs} | "
-              f"Train Loss: {train_loss:.4f} Acc: {train_acc:.4f} | "
-              f"Val Loss: {val_loss:.4f} Acc: {val_acc:.4f}")
+              f"Train: {train_loss:.4f}/{train_acc:.4f} | "
+              f"Val: {val_loss:.4f}/{val_acc:.4f}{status}")
         
         # Save best model
         if val_acc > best_val_acc:
@@ -343,6 +373,11 @@ def main(
                 'model_type': model_type,
             }, model_path)
             print(f"  ✓ Saved best model (val_acc: {val_acc:.4f})")
+        
+        # Check for convergence
+        if stagnant_epochs >= convergence_patience:
+            print(f"\n✓ Converged: improvement < {convergence_threshold*100:.1f}% for {convergence_patience} epochs")
+            break
     
     print("-" * 60)
     print(f"\nBest validation accuracy: {best_val_acc:.4f} at epoch {best_epoch}")
@@ -384,19 +419,57 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Train chess piece classifier")
     parser.add_argument("--data", default="data/labeled_squares", help="Path to labeled squares")
     parser.add_argument("--output", default="models", help="Output directory for models")
-    parser.add_argument("--epochs", type=int, default=EPOCHS, help="Number of epochs")
+    parser.add_argument("--epochs", type=int, default=EPOCHS, help="Max number of epochs")
     parser.add_argument("--batch-size", type=int, default=BATCH_SIZE, help="Batch size")
     parser.add_argument("--lr", type=float, default=LEARNING_RATE, help="Learning rate")
-    parser.add_argument("--model", choices=["cnn", "resnet18", "resnet34"], default="cnn",
+    parser.add_argument("--model", choices=["cnn", "resnet18", "resnet34"], default="resnet18",
                         help="Model architecture: cnn (custom), resnet18, resnet34")
+    parser.add_argument("--all", action="store_true", help="Train both CNN and ResNet18 models")
+    parser.add_argument("--conv-threshold", type=float, default=CONVERGENCE_THRESHOLD,
+                        help="Min improvement to count as progress (default: 0.001 = 0.1%%)")
+    parser.add_argument("--conv-patience", type=int, default=CONVERGENCE_PATIENCE,
+                        help="Stop after N epochs with < threshold improvement (default: 5)")
     
     args = parser.parse_args()
     
-    main(
-        data_dir=args.data,
-        output_dir=args.output,
-        epochs=args.epochs,
-        batch_size=args.batch_size,
-        lr=args.lr,
-        model_type=args.model,
-    )
+    if args.all:
+        # Train both models
+        print("="*60)
+        print("Training CNN model")
+        print("="*60)
+        main(
+            data_dir=args.data,
+            output_dir=args.output,
+            epochs=args.epochs,
+            batch_size=args.batch_size,
+            lr=args.lr,
+            model_type="cnn",
+            convergence_threshold=args.conv_threshold,
+            convergence_patience=args.conv_patience,
+        )
+        
+        print("\n")
+        print("="*60)
+        print("Training ResNet18 model")
+        print("="*60)
+        main(
+            data_dir=args.data,
+            output_dir=args.output,
+            epochs=args.epochs,
+            batch_size=args.batch_size,
+            lr=args.lr,
+            model_type="resnet18",
+            convergence_threshold=args.conv_threshold,
+            convergence_patience=args.conv_patience,
+        )
+    else:
+        main(
+            data_dir=args.data,
+            output_dir=args.output,
+            epochs=args.epochs,
+            batch_size=args.batch_size,
+            lr=args.lr,
+            model_type=args.model,
+            convergence_threshold=args.conv_threshold,
+            convergence_patience=args.conv_patience,
+        )

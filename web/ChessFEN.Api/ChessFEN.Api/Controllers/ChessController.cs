@@ -139,6 +139,170 @@ public class ChessController : ControllerBase
     }
 
     /// <summary>
+    /// Deep analysis: Run all models and check for games on Chess.com
+    /// </summary>
+    [HttpPost("analyze/deep")]
+    public async Task<ActionResult<DeepAnalysisResponse>> DeepAnalysis(
+        [FromBody] Dictionary<string, string> body,
+        [FromQuery] bool skipDetection = false)
+    {
+        if (!body.TryGetValue("image", out var imageBase64) || string.IsNullOrEmpty(imageBase64))
+        {
+            return BadRequest(new DeepAnalysisResponse
+            {
+                Success = false,
+                Error = "No image provided"
+            });
+        }
+
+        try
+        {
+            var client = _httpClientFactory.CreateClient("InferenceService");
+            
+            var query = skipDetection ? "?skip_detection=true" : "";
+            var payload = JsonSerializer.Serialize(new { image = imageBase64 });
+            var content = new StringContent(payload, Encoding.UTF8, "application/json");
+
+            // Call multi-model prediction
+            var response = await client.PostAsync($"/api/predict/multi{query}", content);
+            var json = await response.Content.ReadAsStringAsync();
+
+            var multiResult = JsonSerializer.Deserialize<JsonElement>(json);
+            
+            var result = new DeepAnalysisResponse
+            {
+                Success = multiResult.GetProperty("success").GetBoolean(),
+                Consensus = multiResult.TryGetProperty("consensus", out var c) && c.GetBoolean(),
+                ConsensusFen = multiResult.TryGetProperty("consensus_fen", out var cf) ? cf.GetString() : null,
+                ModelResults = new List<ModelPrediction>(),
+                Disagreements = new List<SquareDisagreement>()
+            };
+
+            // Parse model results
+            if (multiResult.TryGetProperty("results", out var results))
+            {
+                foreach (var r in results.EnumerateArray())
+                {
+                    result.ModelResults.Add(new ModelPrediction
+                    {
+                        Model = r.TryGetProperty("model", out var m) ? m.GetString() : null,
+                        Type = r.TryGetProperty("type", out var t) ? t.GetString() : null,
+                        Accuracy = r.TryGetProperty("accuracy", out var a) ? a.GetString() : null,
+                        Success = r.TryGetProperty("success", out var s) && s.GetBoolean(),
+                        Fen = r.TryGetProperty("fen", out var f) ? f.GetString() : null,
+                        Error = r.TryGetProperty("error", out var e) ? e.GetString() : null
+                    });
+                }
+            }
+
+            // Parse disagreements
+            if (multiResult.TryGetProperty("disagreements", out var disagreements))
+            {
+                foreach (var d in disagreements.EnumerateArray())
+                {
+                    var dis = new SquareDisagreement
+                    {
+                        Square = d.TryGetProperty("square", out var sq) ? sq.GetString() : null,
+                        Predictions = new Dictionary<string, string>()
+                    };
+                    if (d.TryGetProperty("predictions", out var preds))
+                    {
+                        foreach (var p in preds.EnumerateObject())
+                        {
+                            dis.Predictions[p.Name] = p.Value.GetString() ?? "";
+                        }
+                    }
+                    result.Disagreements.Add(dis);
+                }
+            }
+
+            // Get recommended FEN (consensus or best model)
+            if (result.Consensus && result.ConsensusFen != null)
+            {
+                result.RecommendedFen = result.ConsensusFen;
+            }
+            else
+            {
+                // Use the FEN from the "best" model (one with highest accuracy or "best" in name)
+                var bestModel = result.ModelResults?
+                    .Where(r => r.Success && r.Fen != null)
+                    .OrderByDescending(r => r.Model?.Contains("best") == true)
+                    .ThenByDescending(r => r.Accuracy)
+                    .FirstOrDefault();
+                result.RecommendedFen = bestModel?.Fen;
+            }
+
+            // Check Chess.com for games (using recommended FEN)
+            if (!string.IsNullOrEmpty(result.RecommendedFen))
+            {
+                var fenPart = result.RecommendedFen;
+                var whiteFen = $"{fenPart} w KQkq - 0 1";
+                var blackFen = $"{fenPart} b KQkq - 0 1";
+
+                var whiteCheck = await CheckChessComGamesInternal(whiteFen);
+                var blackCheck = await CheckChessComGamesInternal(blackFen);
+
+                result.GamesFoundWhite = whiteCheck;
+                result.GamesFoundBlack = blackCheck;
+
+                if (whiteCheck && blackCheck)
+                    result.GamesMessage = "✓ Games found for both sides!";
+                else if (whiteCheck)
+                    result.GamesMessage = "✓ Games found (White to move)";
+                else if (blackCheck)
+                    result.GamesMessage = "✓ Games found (Black to move)";
+                else
+                    result.GamesMessage = "No games found on Chess.com";
+            }
+
+            return Ok(result);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Error in deep analysis");
+            return StatusCode(500, new DeepAnalysisResponse
+            {
+                Success = false,
+                Error = "Deep analysis error: " + ex.Message
+            });
+        }
+    }
+
+    /// <summary>
+    /// Internal helper to check Chess.com for games
+    /// </summary>
+    private async Task<bool> CheckChessComGamesInternal(string fen)
+    {
+        try
+        {
+            var encodedFen = Uri.EscapeDataString(fen);
+            var url = $"https://www.chess.com/games/search?fen={encodedFen}";
+
+            var httpClient = _httpClientFactory.CreateClient();
+            httpClient.DefaultRequestHeaders.Add("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36");
+            httpClient.Timeout = TimeSpan.FromSeconds(10);
+
+            var response = await httpClient.GetAsync(url);
+            var html = await response.Content.ReadAsStringAsync();
+
+            // Check for indicators of games found
+            bool hasNoGamesMessage = html.Contains("No results found") || 
+                                     html.Contains("no games found", StringComparison.OrdinalIgnoreCase);
+            
+            bool hasGamesIndicator = !hasNoGamesMessage && 
+                                     (html.Contains("games-archive-table") || 
+                                      html.Contains("game-row") ||
+                                      html.Contains("master-games-component-row"));
+
+            return hasGamesIndicator;
+        }
+        catch
+        {
+            return false;
+        }
+    }
+
+    /// <summary>
     /// Get available model versions
     /// </summary>
     [HttpGet("models")]
@@ -192,8 +356,13 @@ public class ChessController : ControllerBase
     /// Submit user correction feedback
     /// </summary>
     [HttpPost("feedback")]
-    public async Task<ActionResult<FeedbackResponse>> SubmitFeedback([FromBody] FeedbackRequest request)
+    public async Task<ActionResult<FeedbackResponse>> SubmitFeedback([FromBody] FeedbackRequest? request)
     {
+        if (request == null)
+        {
+            return BadRequest(new FeedbackResponse { Success = false, Error = "Request body is required" });
+        }
+        
         try
         {
             var client = _httpClientFactory.CreateClient("InferenceService");
