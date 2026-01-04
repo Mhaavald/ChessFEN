@@ -1,0 +1,72 @@
+name: Deploy to Azure Container Apps
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+env:
+  AZURE_CONTAINER_REGISTRY: chessfenacr.azurecr.io
+  CONTAINER_NAME: chessfen
+  RESOURCE_GROUP: rg-chessfen
+  CONTAINER_APP_NAME: chessfen-app
+  CONTAINER_APP_ENV: chessfen-env
+
+jobs:
+  build-and-deploy:
+    runs-on: ubuntu-latest
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          lfs: true
+
+      - name: Login to Azure
+        uses: azure/login@v2
+        with:
+          creds: ${{ secrets.AZURE_CREDENTIALS }}
+
+      - name: Login to Azure Container Registry
+        run: |
+          az acr login --name chessfenacr
+
+      - name: Build and push container image
+        run: |
+          docker build -f deploy/Dockerfile -t ${{ env.AZURE_CONTAINER_REGISTRY }}/${{ env.CONTAINER_NAME }}:${{ github.sha }} -t ${{ env.AZURE_CONTAINER_REGISTRY }}/${{ env.CONTAINER_NAME }}:latest .
+          docker push ${{ env.AZURE_CONTAINER_REGISTRY }}/${{ env.CONTAINER_NAME }}:${{ github.sha }}
+          docker push ${{ env.AZURE_CONTAINER_REGISTRY }}/${{ env.CONTAINER_NAME }}:latest
+
+      - name: Deploy to Container Apps
+        run: |
+          # Check if app exists
+          if az containerapp show --name ${{ env.CONTAINER_APP_NAME }} --resource-group ${{ env.RESOURCE_GROUP }} &> /dev/null; then
+            echo "Updating existing Container App..."
+            az containerapp update \
+              --name ${{ env.CONTAINER_APP_NAME }} \
+              --resource-group ${{ env.RESOURCE_GROUP }} \
+              --image ${{ env.AZURE_CONTAINER_REGISTRY }}/${{ env.CONTAINER_NAME }}:${{ github.sha }}
+          else
+            echo "Creating new Container App..."
+            az containerapp create \
+              --name ${{ env.CONTAINER_APP_NAME }} \
+              --resource-group ${{ env.RESOURCE_GROUP }} \
+              --environment ${{ env.CONTAINER_APP_ENV }} \
+              --image ${{ env.AZURE_CONTAINER_REGISTRY }}/${{ env.CONTAINER_NAME }}:${{ github.sha }} \
+              --registry-server ${{ env.AZURE_CONTAINER_REGISTRY }} \
+              --target-port 80 \
+              --ingress external \
+              --cpu 1 \
+              --memory 2Gi \
+              --min-replicas 0 \
+              --max-replicas 3 \
+              --scale-rule-name http-scaling \
+              --scale-rule-type http \
+              --scale-rule-http-concurrency 10
+          fi
+
+      - name: Get Container App URL
+        run: |
+          URL=$(az containerapp show --name ${{ env.CONTAINER_APP_NAME }} --resource-group ${{ env.RESOURCE_GROUP }} --query "properties.configuration.ingress.fqdn" -o tsv)
+          echo "🚀 Deployed to: https://$URL"
+          echo "DEPLOY_URL=https://$URL" >> $GITHUB_ENV

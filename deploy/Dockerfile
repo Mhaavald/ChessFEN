@@ -1,0 +1,64 @@
+# Multi-runtime container: Python + .NET + nginx
+# For Azure Container Apps deployment
+
+FROM mcr.microsoft.com/dotnet/aspnet:8.0 AS base
+
+# Install Python 3.11 and nginx
+RUN apt-get update && apt-get install -y \
+    python3.11 \
+    python3.11-venv \
+    python3-pip \
+    nginx \
+    supervisor \
+    && rm -rf /var/lib/apt/lists/*
+
+# Create symlink for python
+RUN ln -sf /usr/bin/python3.11 /usr/bin/python
+
+# Set up working directory
+WORKDIR /app
+
+# Copy Python inference service
+COPY src/inference/ /app/inference/
+COPY models/ /app/models/
+
+# Install Python dependencies
+RUN python -m pip install --no-cache-dir -r /app/inference/requirements.txt
+
+# Build .NET API
+FROM mcr.microsoft.com/dotnet/sdk:8.0 AS build
+WORKDIR /src
+COPY web/ChessFEN.Api/ChessFEN.Api/ ./ChessFEN.Api/
+WORKDIR /src/ChessFEN.Api
+RUN dotnet restore
+RUN dotnet publish -c Release -o /app/publish
+
+# Final image
+FROM base AS final
+
+# Copy .NET API
+COPY --from=build /app/publish /app/api/
+
+# Copy static web client
+COPY web/ChessFEN.Client/ /app/wwwroot/
+
+# Copy nginx config
+COPY deploy/nginx.conf /etc/nginx/nginx.conf
+
+# Copy supervisor config
+COPY deploy/supervisord.conf /etc/supervisor/conf.d/supervisord.conf
+
+# Create startup script
+RUN echo '#!/bin/bash\n\
+exec /usr/bin/supervisord -c /etc/supervisor/conf.d/supervisord.conf' > /app/start.sh \
+    && chmod +x /app/start.sh
+
+# Expose port 80
+EXPOSE 80
+
+# Health check
+HEALTHCHECK --interval=30s --timeout=10s --start-period=60s --retries=3 \
+    CMD curl -f http://localhost/health || exit 1
+
+# Start supervisor (manages nginx, python, dotnet)
+CMD ["/app/start.sh"]
