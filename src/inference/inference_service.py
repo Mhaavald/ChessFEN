@@ -31,7 +31,13 @@ import torchvision.models as models
 from PIL import Image
 
 # Add project paths
-REPO_ROOT = Path(__file__).resolve().parents[2]
+# In container: /app/inference/inference_service.py -> parents[1] = /app
+# In dev: src/inference/inference_service.py -> parents[2] = repo root
+SCRIPT_DIR = Path(__file__).resolve().parent
+if (SCRIPT_DIR.parent / "scripts").exists():
+    REPO_ROOT = SCRIPT_DIR.parent  # Container: /app
+else:
+    REPO_ROOT = SCRIPT_DIR.parents[1]  # Dev: repo root
 sys.path.insert(0, str(REPO_ROOT / "scripts"))
 
 from detect_board import detect_board_quad_grid_aware, warp_quad
