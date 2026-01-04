@@ -49,10 +49,12 @@ COPY deploy/nginx.conf /etc/nginx/nginx.conf
 # Copy supervisor config
 COPY deploy/supervisord.conf /etc/supervisor/conf.d/supervisord.conf
 
-# Create startup script
-RUN echo '#!/bin/bash\n\
-exec /usr/bin/supervisord -c /etc/supervisor/conf.d/supervisord.conf' > /app/start.sh \
-    && chmod +x /app/start.sh
+# Copy and setup startup script
+COPY deploy/start.sh /app/start.sh
+RUN chmod +x /app/start.sh
+
+# Create required directories
+RUN mkdir -p /var/log/supervisor /var/run
 
 # Expose port 80
 EXPOSE 80
