@@ -27,10 +27,10 @@ RUN python -m pip install --no-cache-dir -r /app/inference/requirements.txt
 
 # Build .NET API
 FROM mcr.microsoft.com/dotnet/sdk:8.0 AS build
-WORKDIR /src
-COPY web/ChessFEN.Api/ChessFEN.Api/ ./ChessFEN.Api/
 WORKDIR /src/ChessFEN.Api
+COPY web/ChessFEN.Api/ChessFEN.Api/*.csproj ./
 RUN dotnet restore
+COPY web/ChessFEN.Api/ChessFEN.Api/ ./
 RUN dotnet publish -c Release -o /app/publish
 
 # Final image
