@@ -9,7 +9,7 @@ const CONFIG = {
     CHESS_COM_SEARCH_URL: window.APP_CONFIG?.CHESS_COM_SEARCH_URL || 'https://www.chess.com/games/search',
     CHESS_COM_ANALYSIS_URL: 'https://www.chess.com/analysis',
     CHESS_COM_PLAY_URL: 'https://www.chess.com/analysis',
-    CAPTURE_SIZE: 512,
+    CAPTURE_SIZE: 1024,  // Increased from 512 for better quality
     PIECE_UNICODE: {
         'wK': '♔', 'wQ': '♕', 'wR': '♖', 'wB': '♗', 'wN': '♘', 'wP': '♙',
         'bK': '♚', 'bQ': '♛', 'bR': '♜', 'bB': '♝', 'bN': '♞', 'bP': '♟',
@@ -181,7 +181,12 @@ async function openCamera() {
     
     try {
         const constraints = {
-            video: { facingMode: state.facingMode },
+            video: { 
+                facingMode: state.facingMode,
+                // Request high resolution - browser will use closest available
+                width: { ideal: 1920, min: 1280 },
+                height: { ideal: 1920, min: 1280 }
+            },
             audio: false
         };
         
@@ -255,8 +260,9 @@ function captureFrame() {
         
         // No client-side preprocessing - all preprocessing is done server-side for consistency
         
-        // Get base64
-        const base64 = canvas.toDataURL('image/jpeg', 0.92).split(',')[1];
+        // Get base64 - use high quality JPEG (0.95)
+        const base64 = canvas.toDataURL('image/jpeg', 0.95).split(',')[1];
+        console.log(`[CAPTURE] Video: ${vw}x${vh}, Captured: ${CONFIG.CAPTURE_SIZE}x${CONFIG.CAPTURE_SIZE}`);
         
         closeCamera();
         setImage(base64);
@@ -405,7 +411,7 @@ async function analyzeBoard() {
                 state.warpedImageBase64 = null;
             }
             
-            displayResults();
+            await displayResults();
         } else {
             // Show the actual response for debugging
             throw new Error(error || 'Board detection failed. Try "skip detection" if image is already cropped. Response: ' + JSON.stringify(result).substring(0, 100));
@@ -430,7 +436,7 @@ async function deepAnalyzeBoard() {
     
     try {
         const skipDetection = elements.skipDetection.checked;
-        const query = skipDetection ? '?skipDetection=true' : '';
+        const query = skipDetection ? '?skip_detection=true' : '';
         
         const url = `${CONFIG.API_BASE}/analyze/deep${query}`;
         console.log('Calling Deep Analysis API:', url);
@@ -479,7 +485,7 @@ async function deepAnalyzeBoard() {
             state.editMode = false;
             
             // Display results and deep analysis info
-            displayResults();
+            await displayResults();
             displayDeepAnalysisResults(result);
         } else {
             throw new Error('No FEN could be determined from any model');
@@ -557,7 +563,7 @@ function displayDeepAnalysisResults(result) {
 // Results Display
 // ============================================
 
-function displayResults() {
+async function displayResults() {
     // Hide deep analysis results (will be shown by displayDeepAnalysisResults if needed)
     elements.deepAnalysisResults.hidden = true;
     
@@ -577,6 +583,15 @@ function displayResults() {
     } else {
         capturedBoardContainer.hidden = true;
         predictedBoardTitle.hidden = true;
+    }
+    
+    // Validate questionable pieces using Chess.com before displaying
+    if (state.questionableSquares && state.questionableSquares.length > 0) {
+        console.log('displayResults: Validating questionable pieces via Chess.com...');
+        const resolved = await validateQuestionablePieces();
+        if (resolved) {
+            console.log('displayResults: Questionable pieces resolved via Chess.com validation');
+        }
     }
     
     // Render board
@@ -969,7 +984,7 @@ function handleSquareClick(row, col) {
     if (elements.noGamesFound) elements.noGamesFound.hidden = true;
 }
 
-function resetBoard() {
+async function resetBoard() {
     state.board = JSON.parse(JSON.stringify(state.originalBoard));
     state.resultFen = state.originalFen;
     state.corrections = {};
@@ -978,7 +993,7 @@ function resetBoard() {
     elements.editBoardBtn.textContent = '✏️ Edit';
     elements.piecePalette.hidden = true;
     
-    displayResults();
+    await displayResults();
     showToast('Board reset to original');
 }
 
@@ -1093,6 +1108,139 @@ async function submitCorrections() {
 // ============================================
 // Chess.com Game Check
 // ============================================
+
+/**
+ * Validate questionable pieces by checking which FEN variant matches games on Chess.com.
+ * If one variant has games and another doesn't, we update the board to match.
+ */
+async function validateQuestionablePieces() {
+    if (!state.questionableSquares || state.questionableSquares.length === 0) {
+        console.log('validateQuestionablePieces: No questionable squares');
+        return false;
+    }
+    
+    // Only validate if the current FEN is valid
+    const fenValidation = validateFen(state.resultFen);
+    if (!fenValidation.isValid) {
+        console.log('validateQuestionablePieces: FEN is invalid, skipping Chess.com validation');
+        return false;
+    }
+    
+    // Find queen color issues
+    const queenIssues = state.questionableSquares.filter(q => 
+        q.reason && q.reason.toLowerCase().includes('queen') && 
+        (q.piece === 'wQ' || q.piece === 'bQ')
+    );
+    
+    if (queenIssues.length === 0) {
+        console.log('validateQuestionablePieces: No queen color issues');
+        return false;
+    }
+    
+    console.log('validateQuestionablePieces: Found queen issues:', queenIssues);
+    
+    // Generate current FEN and alternative FEN(s) by swapping queen colors
+    const castling = inferCastlingRights();
+    const currentFen = `${state.resultFen} w ${castling} - 0 1`;
+    
+    // Create alternative board by swapping questionable queen colors
+    const alternativeBoard = JSON.parse(JSON.stringify(state.board));
+    for (const issue of queenIssues) {
+        const col = issue.square.charCodeAt(0) - 97; // 'a' = 0
+        const row = 8 - parseInt(issue.square[1]);   // '8' = 0
+        
+        if (alternativeBoard[row] && alternativeBoard[row][col]) {
+            const currentPiece = alternativeBoard[row][col];
+            if (currentPiece === 'wQ') {
+                alternativeBoard[row][col] = 'bQ';
+            } else if (currentPiece === 'bQ') {
+                alternativeBoard[row][col] = 'wQ';
+            }
+        }
+    }
+    
+    // Generate alternative FEN
+    const alternativeFenParts = [];
+    for (let row = 0; row < 8; row++) {
+        let emptyCount = 0;
+        let rowFen = '';
+        for (let col = 0; col < 8; col++) {
+            const piece = alternativeBoard[row][col];
+            if (piece === 'empty' || !piece) {
+                emptyCount++;
+            } else {
+                if (emptyCount > 0) {
+                    rowFen += emptyCount;
+                    emptyCount = 0;
+                }
+                rowFen += pieceToFenChar(piece);
+            }
+        }
+        if (emptyCount > 0) rowFen += emptyCount;
+        alternativeFenParts.push(rowFen);
+    }
+    const alternativeResultFen = alternativeFenParts.join('/');
+    const alternativeFen = `${alternativeResultFen} w ${castling} - 0 1`;
+    
+    console.log('validateQuestionablePieces: Checking variants...');
+    console.log('  Current:', currentFen);
+    console.log('  Alternative:', alternativeFen);
+    
+    try {
+        const response = await fetch(`${CONFIG.API_BASE}/validate-fen-variants`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                fenVariants: [
+                    { fen: currentFen, label: 'current' },
+                    { fen: alternativeFen, label: 'swapped' }
+                ]
+            })
+        });
+        
+        if (!response.ok) {
+            console.error('validateQuestionablePieces: API error:', response.status);
+            return false;
+        }
+        
+        const result = await response.json();
+        console.log('validateQuestionablePieces: Result:', result);
+        
+        if (!result.success) {
+            console.error('validateQuestionablePieces: Validation failed:', result.error);
+            return false;
+        }
+        
+        const currentResult = result.variants?.find(v => v.label === 'current');
+        const swappedResult = result.variants?.find(v => v.label === 'swapped');
+        
+        // If swapped has games and current doesn't, switch to swapped
+        if (swappedResult?.gamesFound && !currentResult?.gamesFound) {
+            console.log('validateQuestionablePieces: Swapped variant matches games, updating board!');
+            
+            // Update the board with the alternative
+            state.board = alternativeBoard;
+            state.resultFen = alternativeResultFen;
+            
+            // Clear questionable squares since we resolved them
+            state.questionableSquares = null;
+            
+            return true; // Board was updated
+        } else if (currentResult?.gamesFound && !swappedResult?.gamesFound) {
+            console.log('validateQuestionablePieces: Current variant matches games, keeping it');
+            // Current is correct, clear questionable status
+            state.questionableSquares = null;
+            return true; // Resolved (no change needed)
+        } else {
+            console.log('validateQuestionablePieces: Ambiguous result, keeping current:', result.recommendation);
+            return false; // Couldn't resolve
+        }
+        
+    } catch (error) {
+        console.error('validateQuestionablePieces: Error:', error);
+        return false;
+    }
+}
 
 async function checkForGames() {
     if (!state.resultFen) {

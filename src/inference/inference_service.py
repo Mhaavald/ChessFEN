@@ -613,6 +613,9 @@ def fix_duplicate_queens(warped, board, confidences, model, tile_size):
     If there are 2+ queens of the same color, try to fix by checking if one should be the other color.
     In standard chess, each side has at most 1 queen (promotions are rare).
     
+    Key insight: Having one white queen and one black queen is FAR more common than having
+    two queens of the same color. So when uncertain, prefer keeping opposite colors.
+    
     Args:
         warped: Warped board image
         board: 8x8 list of predictions (will be modified in place)
@@ -632,9 +635,84 @@ def fix_duplicate_queens(warped, board, confidences, model, tile_size):
     wQ_positions = [(r, c, confidences[r][c]) for r in range(8) for c in range(8) if board[r][c] == "wQ"]
     bQ_positions = [(r, c, confidences[r][c]) for r in range(8) for c in range(8) if board[r][c] == "bQ"]
     
-    # Check for duplicate white queens
-    if len(wQ_positions) > 1 and len(bQ_positions) == 0:
-        print(f"[QUEEN FIX] Found {len(wQ_positions)} white queens, 0 black queens")
+    total_queens = len(wQ_positions) + len(bQ_positions)
+    
+    # Special case: Exactly 2 queens detected, both same color
+    # In this case, it's much more likely that one should be the opposite color
+    # (having 1 wQ + 1 bQ is far more common than 2 wQ or 2 bQ)
+    if total_queens == 2:
+        if len(wQ_positions) == 2 and len(bQ_positions) == 0:
+            print(f"[QUEEN FIX] Found 2 white queens, 0 black - likely one is black")
+            # Sort by confidence - the lower confidence one is more likely misidentified
+            wQ_positions.sort(key=lambda x: x[2])
+            lowest_conf_row, lowest_conf_col, lowest_conf = wQ_positions[0]
+            highest_conf_row, highest_conf_col, highest_conf = wQ_positions[1]
+            
+            square_low = f"{'abcdefgh'[lowest_conf_col]}{8-lowest_conf_row}"
+            square_high = f"{'abcdefgh'[highest_conf_col]}{8-highest_conf_row}"
+            
+            # Position-based heuristic: queen on opponent's back ranks more likely to be that color
+            is_on_black_back_ranks = lowest_conf_row <= 1  # rows 0-1 are ranks 8-7
+            
+            print(f"[QUEEN FIX] Lower conf: {square_low} ({lowest_conf*100:.1f}%), Higher: {square_high} ({highest_conf*100:.1f}%)")
+            
+            # If confidence difference is large OR position strongly suggests black queen, swap
+            conf_diff = highest_conf - lowest_conf
+            if conf_diff > 0.15 or is_on_black_back_ranks:
+                print(f"[QUEEN FIX] Strong evidence - changing {square_low} from wQ to bQ")
+                board[lowest_conf_row][lowest_conf_col] = "bQ"
+                fixes_made.append((square_low, "bQ", "wQ"))
+            else:
+                # Not confident enough to auto-fix, but prefer opposite colors
+                # Change the lower confidence one and mark as questionable
+                print(f"[QUEEN FIX] Weak evidence - changing {square_low} to bQ but marking questionable")
+                board[lowest_conf_row][lowest_conf_col] = "bQ"
+                fixes_made.append((square_low, "bQ", "wQ"))
+                questionable_squares.append({
+                    "square": square_low,
+                    "piece": "bQ",
+                    "reason": "Changed from wQ to bQ (2 same-color queens unlikely) - verify color"
+                })
+            return fixes_made, questionable_squares
+        
+        if len(bQ_positions) == 2 and len(wQ_positions) == 0:
+            print(f"[QUEEN FIX] Found 2 black queens, 0 white - likely one is white")
+            # Sort by confidence - the lower confidence one is more likely misidentified
+            bQ_positions.sort(key=lambda x: x[2])
+            lowest_conf_row, lowest_conf_col, lowest_conf = bQ_positions[0]
+            highest_conf_row, highest_conf_col, highest_conf = bQ_positions[1]
+            
+            square_low = f"{'abcdefgh'[lowest_conf_col]}{8-lowest_conf_row}"
+            square_high = f"{'abcdefgh'[highest_conf_col]}{8-highest_conf_row}"
+            
+            # Position-based heuristic: queen on opponent's back ranks more likely to be that color
+            is_on_white_back_ranks = lowest_conf_row >= 6  # rows 6-7 are ranks 2-1
+            
+            print(f"[QUEEN FIX] Lower conf: {square_low} ({lowest_conf*100:.1f}%), Higher: {square_high} ({highest_conf*100:.1f}%)")
+            
+            # If confidence difference is large OR position strongly suggests white queen, swap
+            conf_diff = highest_conf - lowest_conf
+            if conf_diff > 0.15 or is_on_white_back_ranks:
+                print(f"[QUEEN FIX] Strong evidence - changing {square_low} from bQ to wQ")
+                board[lowest_conf_row][lowest_conf_col] = "wQ"
+                fixes_made.append((square_low, "wQ", "bQ"))
+            else:
+                # Not confident enough to auto-fix, but prefer opposite colors
+                # Change the lower confidence one and mark as questionable
+                print(f"[QUEEN FIX] Weak evidence - changing {square_low} to wQ but marking questionable")
+                board[lowest_conf_row][lowest_conf_col] = "wQ"
+                fixes_made.append((square_low, "wQ", "bQ"))
+                questionable_squares.append({
+                    "square": square_low,
+                    "piece": "wQ",
+                    "reason": "Changed from bQ to wQ (2 same-color queens unlikely) - verify color"
+                })
+            return fixes_made, questionable_squares
+    
+    # Handle cases with 3+ queens of same color (original logic)
+    # Check for duplicate white queens (more than one, when there's already a black queen)
+    if len(wQ_positions) > 1:
+        print(f"[QUEEN FIX] Found {len(wQ_positions)} white queens, {len(bQ_positions)} black queens")
         # The one with lowest confidence is most likely to be wrong
         wQ_positions.sort(key=lambda x: x[2])  # Sort by confidence ascending
         lowest_conf_row, lowest_conf_col, lowest_conf = wQ_positions[0]
@@ -648,75 +726,657 @@ def fix_duplicate_queens(warped, board, confidences, model, tile_size):
         is_on_black_back_ranks = lowest_conf_row <= 1  # rows 0-1 are ranks 8-7 (black's back ranks)
         
         square = f"{'abcdefgh'[lowest_conf_col]}{8-lowest_conf_row}"
-        rank = 8 - lowest_conf_row
-        print(f"[QUEEN FIX] Confidence difference: {conf_diff*100:.1f}% (highest: {highest_conf*100:.1f}%, lowest: {lowest_conf*100:.1f}%)")
-        print(f"[QUEEN FIX] Candidate {square} (rank {rank}) is {'on black back ranks' if is_on_black_back_ranks else 'NOT on black back ranks'}")
+        print(f"[QUEEN FIX] Checking {square}: conf_diff={conf_diff*100:.1f}%, on_black_ranks={is_on_black_back_ranks}")
         
-        # Apply fix if: significant confidence diff OR queen is on black's back ranks (7-8)
-        if conf_diff > 0.03 or is_on_black_back_ranks:
-            print(f"[QUEEN FIX] Changing {square} from wQ to bQ")
-            board[lowest_conf_row][lowest_conf_col] = "bQ"
-            confidences[lowest_conf_row][lowest_conf_col] = lowest_conf
-            fixes_made.append((square, "bQ", "wQ"))
-        else:
-            print(f"[QUEEN FIX] Not changing - marking as questionable")
-            # Mark ALL queens as questionable since we don't know which one is wrong
-            for r, c, _ in wQ_positions:
-                sq = f"{'abcdefgh'[c]}{8-r}"
-                questionable_squares.append({
-                    "square": sq,
-                    "piece": "wQ",
-                    "reason": "Detected 2 white queens, 0 black - one might be black queen"
-                })
+        # Only swap if there's no black queen yet
+        if len(bQ_positions) == 0:
+            if conf_diff > 0.03 or is_on_black_back_ranks:
+                print(f"[QUEEN FIX] Changing {square} from wQ to bQ")
+                board[lowest_conf_row][lowest_conf_col] = "bQ"
+                confidences[lowest_conf_row][lowest_conf_col] = lowest_conf
+                fixes_made.append((square, "bQ", "wQ"))
+            else:
+                # Mark as questionable
+                for r, c, _ in wQ_positions:
+                    sq = f"{'abcdefgh'[c]}{8-r}"
+                    questionable_squares.append({
+                        "square": sq,
+                        "piece": "wQ",
+                        "reason": f"Multiple white queens detected ({len(wQ_positions)})"
+                    })
     
     # Check for duplicate black queens
-    if len(bQ_positions) > 1 and len(wQ_positions) == 0:
-        print(f"[QUEEN FIX] Found {len(bQ_positions)} black queens, 0 white queens")
-        # The one with lowest confidence is most likely to be wrong
+    if len(bQ_positions) > 1:
+        print(f"[QUEEN FIX] Found {len(bQ_positions)} black queens, {len(wQ_positions)} white queens")
         bQ_positions.sort(key=lambda x: x[2])  # Sort by confidence ascending
         lowest_conf_row, lowest_conf_col, lowest_conf = bQ_positions[0]
         highest_conf = bQ_positions[-1][2]
         
-        # Calculate confidence difference
         conf_diff = highest_conf - lowest_conf
-        
-        # Position-based heuristic: if a "black" queen is on ranks 1-2 (white's back ranks),
-        # it's very likely to be a misidentified white queen (white rarely loses queen on back rank)
-        is_on_white_back_ranks = lowest_conf_row >= 6  # rows 6-7 are ranks 2-1 (white's back ranks)
+        is_on_white_back_ranks = lowest_conf_row >= 6  # rows 6-7 are ranks 2-1
         
         square = f"{'abcdefgh'[lowest_conf_col]}{8-lowest_conf_row}"
-        rank = 8 - lowest_conf_row
-        print(f"[QUEEN FIX] Confidence difference: {conf_diff*100:.1f}% (highest: {highest_conf*100:.1f}%, lowest: {lowest_conf*100:.1f}%)")
-        print(f"[QUEEN FIX] Candidate {square} (rank {rank}) is {'on white back ranks' if is_on_white_back_ranks else 'NOT on white back ranks'}")
+        print(f"[QUEEN FIX] Checking {square}: conf_diff={conf_diff*100:.1f}%, on_white_ranks={is_on_white_back_ranks}")
         
-        # Apply fix if: significant confidence diff OR queen is on white's back ranks (1-2)
-        if conf_diff > 0.03 or is_on_white_back_ranks:
-            print(f"[QUEEN FIX] Changing {square} from bQ to wQ")
-            board[lowest_conf_row][lowest_conf_col] = "wQ"
-            confidences[lowest_conf_row][lowest_conf_col] = lowest_conf
-            fixes_made.append((square, "wQ", "bQ"))
-        else:
-            print(f"[QUEEN FIX] Not changing - marking as questionable")
-            # Mark ALL queens as questionable since we don't know which one is wrong
-            for r, c, _ in bQ_positions:
-                sq = f"{'abcdefgh'[c]}{8-r}"
-                questionable_squares.append({
-                    "square": sq,
-                    "piece": "bQ",
-                    "reason": "Detected 2 black queens, 0 white - one might be white queen"
-                })
+        # Only swap if there's no white queen yet
+        if len(wQ_positions) == 0:
+            if conf_diff > 0.03 or is_on_white_back_ranks:
+                print(f"[QUEEN FIX] Changing {square} from bQ to wQ")
+                board[lowest_conf_row][lowest_conf_col] = "wQ"
+                confidences[lowest_conf_row][lowest_conf_col] = lowest_conf
+                fixes_made.append((square, "wQ", "bQ"))
+            else:
+                for r, c, _ in bQ_positions:
+                    sq = f"{'abcdefgh'[c]}{8-r}"
+                    questionable_squares.append({
+                        "square": sq,
+                        "piece": "bQ",
+                        "reason": f"Multiple black queens detected ({len(bQ_positions)})"
+                    })
     
     return fixes_made, questionable_squares
 
 
-def find_board_from_kings(img_bgr, model, debug=False):
+def classify_tile_at(img_bgr, x, y, tile_size, model):
     """
-    Fallback board detection: scan image for kings and estimate board location.
+    Classify a tile at given position and return (class, probability, top3).
+    Returns None if position is out of bounds.
+    """
+    h, w = img_bgr.shape[:2]
+    if x < 0 or y < 0 or x + tile_size > w or y + tile_size > h:
+        return None
     
-    Kings are always present and have distinctive shapes. This function:
-    1. Scans the image center area with a sliding window
-    2. Uses the model to detect king probabilities
-    3. If kings found, estimates the board quadrilateral
+    tile = img_bgr[y:y+tile_size, x:x+tile_size]
+    tile_resized = cv2.resize(tile, (TILE_SIZE, TILE_SIZE))
+    tile_rgb = cv2.cvtColor(tile_resized, cv2.COLOR_BGR2RGB)
+    
+    tensor = torch.from_numpy(tile_rgb).permute(2, 0, 1).float() / 255.0
+    tensor = tensor.unsqueeze(0)
+    
+    with torch.no_grad():
+        logits = model(tensor)
+        probs = torch.softmax(logits, dim=1)[0]
+    
+    top_prob, top_idx = probs.max(0)
+    pred_class = CLASSES[top_idx.item()]
+    
+    # Get top 3 for debugging
+    top3_probs, top3_indices = probs.topk(3)
+    top3 = [(CLASSES[i.item()], p.item()) for i, p in zip(top3_indices, top3_probs)]
+    
+    return pred_class, top_prob.item(), top3
+
+
+def is_valid_piece(pred_class, prob, allow_empty=True):
+    """Check if prediction looks like a valid chess piece (or empty square)."""
+    if pred_class == 'empty':
+        return allow_empty and prob > 0.3
+    # Pieces should have reasonable confidence
+    return prob > 0.4
+
+
+def find_best_tile_at(img_bgr, x, y, tile_size, model, max_shift=None):
+    """
+    Find the best tile classification near position (x,y) by trying small offsets.
+    
+    Returns:
+        (best_x, best_y, pred_class, prob) or None if nothing found
+    """
+    if max_shift is None:
+        max_shift = tile_size // 3
+    
+    step = max(2, tile_size // 10)
+    best = None
+    best_prob = 0
+    
+    for dy in range(-max_shift, max_shift + 1, step):
+        for dx in range(-max_shift, max_shift + 1, step):
+            nx, ny = x + dx, y + dy
+            result = classify_tile_at(img_bgr, nx, ny, tile_size, model)
+            if result is None:
+                continue
+            
+            pred_class, prob, _ = result
+            
+            # We want high confidence predictions (piece or empty)
+            if prob > best_prob:
+                best = (nx, ny, pred_class, prob)
+                best_prob = prob
+    
+    return best
+
+
+def find_complete_line(img_bgr, anchor_x, anchor_y, tile_size, horizontal, model, debug=False):
+    """
+    From anchor, walk in both directions along a line to find all 8 squares.
+    
+    This walks left+right (horizontal=True) or up+down (horizontal=False),
+    refining position at each step until we find 8 squares total.
+    
+    Returns:
+        list of 8 (x, y, pred_class, prob) tuples if found, else None
+        The list is ordered from left-to-right or top-to-bottom
+    """
+    h, w = img_bgr.shape[:2]
+    
+    if horizontal:
+        dx1, dy1 = -1, 0  # left
+        dx2, dy2 = 1, 0   # right
+        dir_name = "horizontal"
+    else:
+        dx1, dy1 = 0, -1  # up
+        dx2, dy2 = 0, 1   # down
+        dir_name = "vertical"
+    
+    if debug:
+        print(f"  Finding {dir_name} line from ({anchor_x},{anchor_y})...")
+    
+    # Start with anchor
+    tiles = [(anchor_x, anchor_y, None, 0)]
+    
+    # Get anchor classification
+    result = find_best_tile_at(img_bgr, anchor_x, anchor_y, tile_size, model)
+    if result:
+        tiles[0] = result
+    
+    # Walk in negative direction (left or up)
+    curr_x, curr_y = anchor_x, anchor_y
+    for step in range(1, 8):
+        next_x = curr_x + dx1 * tile_size
+        next_y = curr_y + dy1 * tile_size
+        
+        result = find_best_tile_at(img_bgr, next_x, next_y, tile_size, model)
+        if result is None:
+            break
+        
+        best_x, best_y, pred_class, prob = result
+        if prob < 0.35:
+            break
+        
+        tiles.insert(0, result)  # Prepend
+        curr_x, curr_y = best_x, best_y
+        
+        if debug:
+            print(f"    <- Step {step}: {pred_class} ({prob*100:.0f}%) at ({best_x},{best_y})")
+    
+    # Walk in positive direction (right or down)
+    curr_x, curr_y = anchor_x, anchor_y
+    for step in range(1, 8):
+        next_x = curr_x + dx2 * tile_size
+        next_y = curr_y + dy2 * tile_size
+        
+        result = find_best_tile_at(img_bgr, next_x, next_y, tile_size, model)
+        if result is None:
+            break
+        
+        best_x, best_y, pred_class, prob = result
+        if prob < 0.35:
+            break
+        
+        tiles.append(result)
+        curr_x, curr_y = best_x, best_y
+        
+        if debug:
+            print(f"    -> Step {step}: {pred_class} ({prob*100:.0f}%) at ({best_x},{best_y})")
+    
+    if debug:
+        print(f"    Found {len(tiles)} tiles")
+    
+    # Check if we have exactly 8 (or close to it)
+    if len(tiles) >= 7:
+        return tiles
+    
+    return None
+
+
+def expand_grid_from_anchor(img_bgr, anchor_x, anchor_y, tile_size, model, debug=False):
+    """
+    From an anchor piece, find a complete row or column, then derive the full board.
+    
+    Strategy:
+    1. Try to find a complete horizontal row (8 tiles)
+    2. If found, we know the left edge and tile positions
+    3. Then find where the vertical edges are
+    4. If horizontal fails, try vertical column instead
+    
+    Returns:
+        grid_info: dict with {left, right, top, bottom, tile_size} or None
+    """
+    h, w = img_bgr.shape[:2]
+    
+    if debug:
+        print(f"[LINE] Starting from anchor ({anchor_x},{anchor_y}), tile={tile_size}")
+    
+    # Try horizontal first
+    h_tiles = find_complete_line(img_bgr, anchor_x, anchor_y, tile_size, 
+                                  horizontal=True, model=model, debug=debug)
+    
+    if h_tiles and len(h_tiles) >= 7:
+        # Found horizontal row! 
+        # The leftmost tile gives us grid_left
+        # Now find vertical extent using the leftmost tile's x position
+        grid_left = h_tiles[0][0]
+        row_y = h_tiles[0][1]
+        
+        if debug:
+            print(f"[LINE] Found horizontal row of {len(h_tiles)}, left={grid_left}")
+        
+        # Find vertical extent from the leftmost column
+        v_tiles = find_complete_line(img_bgr, grid_left, row_y, tile_size,
+                                      horizontal=False, model=model, debug=debug)
+        
+        if v_tiles and len(v_tiles) >= 7:
+            grid_top = v_tiles[0][1]
+            
+            # We have the board!
+            grid_right = grid_left + 8 * tile_size
+            grid_bottom = grid_top + 8 * tile_size
+            
+            # Clamp to image
+            if grid_right > w:
+                grid_left = max(0, w - 8 * tile_size)
+                grid_right = w
+            if grid_bottom > h:
+                grid_top = max(0, h - 8 * tile_size)
+                grid_bottom = h
+            
+            if debug:
+                print(f"[LINE] SUCCESS! Grid: ({grid_left},{grid_top}) to ({grid_right},{grid_bottom})")
+            
+            return {
+                'left': grid_left,
+                'top': grid_top,
+                'right': grid_right,
+                'bottom': grid_bottom,
+                'tile_size': tile_size,
+                'h_span': len(h_tiles),
+                'v_span': len(v_tiles)
+            }
+    
+    # Try vertical first if horizontal didn't work
+    v_tiles = find_complete_line(img_bgr, anchor_x, anchor_y, tile_size,
+                                  horizontal=False, model=model, debug=debug)
+    
+    if v_tiles and len(v_tiles) >= 7:
+        # Found vertical column!
+        grid_top = v_tiles[0][1]
+        col_x = v_tiles[0][0]
+        
+        if debug:
+            print(f"[LINE] Found vertical column of {len(v_tiles)}, top={grid_top}")
+        
+        # Find horizontal extent from the top row
+        h_tiles = find_complete_line(img_bgr, col_x, grid_top, tile_size,
+                                      horizontal=True, model=model, debug=debug)
+        
+        if h_tiles and len(h_tiles) >= 7:
+            grid_left = h_tiles[0][0]
+            
+            grid_right = grid_left + 8 * tile_size
+            grid_bottom = grid_top + 8 * tile_size
+            
+            if grid_right > w:
+                grid_left = max(0, w - 8 * tile_size)
+                grid_right = w
+            if grid_bottom > h:
+                grid_top = max(0, h - 8 * tile_size)
+                grid_bottom = h
+            
+            if debug:
+                print(f"[LINE] SUCCESS! Grid: ({grid_left},{grid_top}) to ({grid_right},{grid_bottom})")
+            
+            return {
+                'left': grid_left,
+                'top': grid_top,
+                'right': grid_right,
+                'bottom': grid_bottom,
+                'tile_size': tile_size,
+                'h_span': len(h_tiles),
+                'v_span': len(v_tiles)
+            }
+    
+    if debug:
+        print(f"[LINE] Could not find complete row or column")
+    
+    return None
+
+
+def score_grid_alignment(img_bgr, grid_left, grid_top, tile_size, model):
+    """
+    Score how well an 8x8 grid at this position aligns with chess pieces.
+    Returns (score, piece_count) where score is sum of confidences and
+    piece_count is number of non-empty squares with good confidence.
+    """
+    total_score = 0
+    piece_count = 0
+    empty_count = 0
+    
+    for row in range(8):
+        for col in range(8):
+            x = grid_left + col * tile_size
+            y = grid_top + row * tile_size
+            
+            result = classify_tile_at(img_bgr, x, y, tile_size, model)
+            if result is None:
+                return 0, 0  # Grid extends outside image
+            
+            pred_class, prob, _ = result
+            
+            if pred_class == 'empty':
+                if prob > 0.4:
+                    total_score += prob * 0.5  # Empty squares count less
+                    empty_count += 1
+            else:
+                if prob > 0.3:
+                    total_score += prob
+                    piece_count += 1
+    
+    # Penalize if too many or too few pieces (typical game has 16-32 pieces)
+    if piece_count < 4 or piece_count > 40:
+        total_score *= 0.5
+    
+    return total_score, piece_count
+
+
+def predict_board_at_position(img_bgr, grid_left, grid_top, tile_size, model):
+    """
+    Predict full 8x8 board at given position.
+    Returns (board_2d, avg_confidence, piece_count) or None if invalid.
+    """
+    h, w = img_bgr.shape[:2]
+    
+    board = []
+    total_conf = 0
+    piece_count = 0
+    
+    for row in range(8):
+        board_row = []
+        for col in range(8):
+            x = grid_left + col * tile_size
+            y = grid_top + row * tile_size
+            
+            result = classify_tile_at(img_bgr, x, y, tile_size, model)
+            if result is None:
+                return None  # Off image
+            
+            pred_class, prob, _ = result
+            board_row.append(pred_class)
+            total_conf += prob
+            if pred_class != 'empty':
+                piece_count += 1
+        
+        board.append(board_row)
+    
+    avg_conf = total_conf / 64
+    return board, avg_conf, piece_count
+
+
+def is_valid_chess_position(board, piece_count):
+    """
+    Check if a board position is plausibly valid chess.
+    Returns (is_valid, reason).
+    """
+    # Count pieces
+    counts = {}
+    for row in board:
+        for piece in row:
+            counts[piece] = counts.get(piece, 0) + 1
+    
+    # Must have exactly one white king and one black king
+    if counts.get('wK', 0) != 1:
+        return False, f"white kings: {counts.get('wK', 0)}"
+    if counts.get('bK', 0) != 1:
+        return False, f"black kings: {counts.get('bK', 0)}"
+    
+    # Reasonable piece counts (max in standard chess)
+    if counts.get('wQ', 0) > 9:  # 1 original + 8 promoted
+        return False, "too many white queens"
+    if counts.get('bQ', 0) > 9:
+        return False, "too many black queens"
+    if counts.get('wR', 0) > 10:
+        return False, "too many white rooks"
+    if counts.get('bR', 0) > 10:
+        return False, "too many black rooks"
+    
+    # Total pieces should be reasonable (2 to 32)
+    if piece_count < 2:
+        return False, "too few pieces"
+    if piece_count > 32:
+        return False, "too many pieces"
+    
+    return True, "valid"
+
+
+def find_board_from_high_confidence_pieces(img_bgr, model, debug=False):
+    """
+    Find board by locating high-confidence pieces and deriving board candidates.
+    
+    Strategy:
+    1. Scan image for pieces with very high confidence (>90%)
+    2. For each high-confidence piece found, it constrains the board position
+    3. Generate board candidates based on where the piece could be (any of 64 squares)
+    4. But only try positions where piece is on valid square given its location
+    5. Score each candidate by predicting full board and checking validity
+    
+    Args:
+        img_bgr: Input image in BGR format  
+        model: PyTorch model for classification
+        debug: Include debug info
+    
+    Returns:
+        quad: 4 corner points of detected board (or None if not found)
+        debug_info: dict with search details if debug=True
+    """
+    import time
+    start_time = time.time()
+    
+    h, w = img_bgr.shape[:2]
+    debug_info = {"method": "high_confidence_pieces"} if debug else None
+    
+    print(f"[HC DETECT] Image size: {w}x{h}")
+    print(f"[HC DETECT] Looking for high-confidence pieces...")
+    
+    # Try different tile sizes
+    min_dim = min(h, w)
+    tile_sizes = []
+    for divisor in range(8, 14):
+        tile_size = min_dim // divisor
+        if 40 <= tile_size <= 120:
+            tile_sizes.append(tile_size)
+    
+    tile_sizes = sorted(set(tile_sizes), reverse=True)
+    
+    for tile_size in tile_sizes:
+        print(f"[HC DETECT] Trying tile_size={tile_size}...")
+        
+        high_conf_pieces = []
+        
+        # Scan with 50% overlap for speed
+        step = tile_size // 2
+        
+        for y in range(0, h - tile_size, step):
+            for x in range(0, w - tile_size, step):
+                result = classify_tile_at(img_bgr, x, y, tile_size, model)
+                if result is None:
+                    continue
+                
+                pred_class, prob, _ = result
+                
+                # Only high confidence pieces (not empty)
+                if pred_class != 'empty' and prob > 0.85:
+                    # Refine position
+                    best = find_best_tile_at(img_bgr, x, y, tile_size, model, 
+                                              max_shift=tile_size // 4)
+                    if best and best[3] > 0.85:
+                        high_conf_pieces.append({
+                            'x': best[0],
+                            'y': best[1],
+                            'class': best[2],
+                            'prob': best[3]
+                        })
+                        if debug:
+                            print(f"  Found {best[2]} ({best[3]*100:.0f}%) at ({best[0]},{best[1]})")
+        
+        if len(high_conf_pieces) < 2:
+            print(f"  Only {len(high_conf_pieces)} high-confidence pieces, need at least 2")
+            continue
+        
+        print(f"  Found {len(high_conf_pieces)} high-confidence pieces")
+        
+        # Use the highest confidence piece as anchor
+        high_conf_pieces.sort(key=lambda p: -p['prob'])
+        anchor = high_conf_pieces[0]
+        
+        # The anchor piece could be on any of the 64 squares
+        # But we can limit based on where it is in the image
+        # If anchor is at (ax, ay), and board is at (bx, by), then:
+        # ax = bx + col * tile_size, ay = by + row * tile_size
+        # So: bx = ax - col * tile_size, by = ay - row * tile_size
+        
+        board_candidates = []
+        
+        for row in range(8):
+            for col in range(8):
+                grid_left = anchor['x'] - col * tile_size
+                grid_top = anchor['y'] - row * tile_size
+                
+                # Check bounds
+                grid_right = grid_left + 8 * tile_size
+                grid_bottom = grid_top + 8 * tile_size
+                
+                if grid_left < -tile_size//2 or grid_top < -tile_size//2:
+                    continue
+                if grid_right > w + tile_size//2 or grid_bottom > h + tile_size//2:
+                    continue
+                
+                # Clamp to image
+                grid_left = max(0, grid_left)
+                grid_top = max(0, grid_top)
+                
+                board_candidates.append((grid_left, grid_top, row, col))
+        
+        print(f"  Generated {len(board_candidates)} board candidates")
+        
+        # Score each candidate
+        best_candidate = None
+        best_score = 0
+        
+        for grid_left, grid_top, anchor_row, anchor_col in board_candidates:
+            result = predict_board_at_position(img_bgr, grid_left, grid_top, tile_size, model)
+            if result is None:
+                continue
+            
+            board, avg_conf, piece_count = result
+            
+            # Check if valid position
+            is_valid, reason = is_valid_chess_position(board, piece_count)
+            
+            if not is_valid:
+                continue
+            
+            # Score: average confidence + bonus for piece count in reasonable range
+            score = avg_conf
+            if 8 <= piece_count <= 32:
+                score += 0.1
+            
+            if score > best_score:
+                best_score = score
+                best_candidate = (grid_left, grid_top, board, avg_conf, piece_count)
+        
+        if best_candidate:
+            grid_left, grid_top, board, avg_conf, piece_count = best_candidate
+            grid_right = grid_left + 8 * tile_size
+            grid_bottom = grid_top + 8 * tile_size
+            
+            quad = np.array([
+                [grid_left, grid_top],
+                [grid_right, grid_top],
+                [grid_right, grid_bottom],
+                [grid_left, grid_bottom],
+            ], dtype=np.float32)
+            
+            elapsed = time.time() - start_time
+            print(f"[HC DETECT] SUCCESS in {elapsed:.2f}s!")
+            print(f"  Grid: ({grid_left},{grid_top}) to ({grid_right},{grid_bottom})")
+            print(f"  Avg confidence: {avg_conf*100:.1f}%, Pieces: {piece_count}")
+            
+            if debug:
+                debug_info["success"] = True
+                debug_info["elapsed_seconds"] = elapsed
+                debug_info["grid_left"] = grid_left
+                debug_info["grid_top"] = grid_top
+                debug_info["tile_size"] = tile_size
+                debug_info["avg_confidence"] = avg_conf
+                debug_info["piece_count"] = piece_count
+            
+            return quad, debug_info
+        
+        print(f"  No valid board found at this tile size")
+        
+        # Timeout
+        if time.time() - start_time > 10:
+            print(f"[HC DETECT] Timeout")
+            break
+    
+    elapsed = time.time() - start_time
+    print(f"[HC DETECT] FAILED after {elapsed:.2f}s")
+    
+    if debug:
+        debug_info["success"] = False
+        debug_info["elapsed_seconds"] = elapsed
+    
+    return None, debug_info
+
+
+def refine_tile_position(img_bgr, x, y, tile_size, model, piece_class):
+    """
+    Fine-tune tile position by shifting small amounts to maximize confidence.
+    
+    When we find a piece at moderate confidence (e.g. 60%), shifting by a few
+    pixels might get us to 90%+ - indicating we found the true tile alignment.
+    
+    Returns:
+        (best_x, best_y, best_prob) or None if can't improve significantly
+    """
+    best_x, best_y = x, y
+    best_prob = 0
+    
+    # Initial classification
+    result = classify_tile_at(img_bgr, x, y, tile_size, model)
+    if result:
+        _, best_prob, _ = result
+    
+    # Try shifting by small amounts (up to 1/4 tile size)
+    max_shift = tile_size // 4
+    step = max(2, tile_size // 16)  # Smaller steps for finer tuning
+    
+    for dy in range(-max_shift, max_shift + 1, step):
+        for dx in range(-max_shift, max_shift + 1, step):
+            nx, ny = x + dx, y + dy
+            result = classify_tile_at(img_bgr, nx, ny, tile_size, model)
+            if result is None:
+                continue
+            
+            pred_class, prob, _ = result
+            
+            # Only consider if it's the same piece type
+            if pred_class == piece_class and prob > best_prob:
+                best_x, best_y = nx, ny
+                best_prob = prob
+    
+    return best_x, best_y, best_prob
+
+
+def find_board_from_center(img_bgr, model, debug=False):
+    """
+    Board detection by starting from image center and finding pieces.
+    
+    Strategy:
+    1. Assume center of image is somewhere on the board
+    2. Try different tile sizes, starting from center
+    3. When we find a piece with moderate confidence, fine-tune position
+    4. Once we have high confidence (>85%), we know the tile size is right
+    5. Expand from that anchor to find the full 8x8 grid
     
     Args:
         img_bgr: Input image in BGR format
@@ -724,136 +1384,161 @@ def find_board_from_kings(img_bgr, model, debug=False):
         debug: Include debug info
     
     Returns:
-        quad: 4 corner points of estimated board (or None if not found)
+        quad: 4 corner points of detected board (or None if not found)
         debug_info: dict with search details if debug=True
     """
+    import time
+    start_time = time.time()
+    
     h, w = img_bgr.shape[:2]
-    debug_info = {} if debug else None
+    debug_info = {"method": "center_piece_expansion"} if debug else None
     
-    # Estimate tile size based on image - assume board is 50-90% of image
-    min_tile = min(h, w) // 16  # Board = 8 tiles, so min 50% -> 8 tiles
-    max_tile = min(h, w) // 8   # Board = 8 tiles, so max 100% -> 8 tiles
+    print(f"[PIECE DETECT] Image size: {w}x{h}")
+    print(f"[PIECE DETECT] Starting from center, looking for pieces...")
     
-    # Try a few tile sizes
-    tile_sizes = [
-        min(h, w) // 10,  # ~80% of image is board
-        min(h, w) // 12,  # ~67% of image is board  
-        min(h, w) // 14,  # ~57% of image is board
-    ]
+    # Center of image
+    cx, cy = w // 2, h // 2
     
-    best_king_score = 0
-    best_king_pos = None
-    best_tile_size = None
-    best_king_type = None
+    # Try tile sizes from large to small
+    min_dim = min(h, w)
+    tile_sizes = []
+    for divisor in range(8, 16):
+        tile_size = min_dim // divisor
+        if 30 <= tile_size <= 150:
+            tile_sizes.append(tile_size)
     
-    # Scan center region of image (kings are usually somewhere on the board)
-    # Focus on center 80% of image
-    margin_y = int(h * 0.1)
-    margin_x = int(w * 0.1)
+    tile_sizes = sorted(set(tile_sizes), reverse=True)
+    print(f"[PIECE DETECT] Tile sizes to try: {tile_sizes}")
     
-    king_candidates = []
+    classifications = 0
     
     for tile_size in tile_sizes:
-        if tile_size < 20:
-            continue
-            
-        # Slide window across image
-        step = tile_size // 2  # 50% overlap
+        print(f"[PIECE DETECT] Trying tile_size={tile_size}...")
         
-        for y in range(margin_y, h - margin_y - tile_size, step):
-            for x in range(margin_x, w - margin_x - tile_size, step):
-                tile = img_bgr[y:y+tile_size, x:x+tile_size]
+        # Sample positions around center - spiral outward
+        # Start at center, then check positions in expanding squares
+        positions = [(cx - tile_size//2, cy - tile_size//2)]  # Center tile
+        
+        # Add positions in expanding rings around center
+        for ring in range(1, 6):  # Up to 5 rings out
+            offset = ring * tile_size
+            # Top and bottom edges of ring
+            for dx in range(-ring, ring + 1):
+                positions.append((cx - tile_size//2 + dx * tile_size, cy - tile_size//2 - offset))
+                positions.append((cx - tile_size//2 + dx * tile_size, cy - tile_size//2 + offset))
+            # Left and right edges of ring (excluding corners)
+            for dy in range(-ring + 1, ring):
+                positions.append((cx - tile_size//2 - offset, cy - tile_size//2 + dy * tile_size))
+                positions.append((cx - tile_size//2 + offset, cy - tile_size//2 + dy * tile_size))
+        
+        for x, y in positions:
+            result = classify_tile_at(img_bgr, x, y, tile_size, model)
+            classifications += 1
+            
+            if result is None:
+                continue
+            
+            pred_class, prob, top3 = result
+            
+            # Look for any piece (not empty) with at least 40% confidence
+            if pred_class != 'empty' and prob > 0.4:
+                print(f"  Found candidate: {pred_class} ({prob*100:.0f}%) at ({x},{y})")
                 
-                # Resize to model input size
-                tile_resized = cv2.resize(tile, (TILE_SIZE, TILE_SIZE))
-                tile_rgb = cv2.cvtColor(tile_resized, cv2.COLOR_BGR2RGB)
+                # Fine-tune the position to maximize confidence
+                ref_x, ref_y, ref_prob = refine_tile_position(
+                    img_bgr, x, y, tile_size, model, pred_class
+                )
+                classifications += (tile_size // max(2, tile_size // 16)) ** 2  # Approximate
                 
-                tensor = torch.from_numpy(tile_rgb).permute(2, 0, 1).float() / 255.0
-                tensor = tensor.unsqueeze(0)
+                print(f"  Refined: {pred_class} ({ref_prob*100:.0f}%) at ({ref_x},{ref_y})")
                 
-                with torch.no_grad():
-                    logits = model(tensor)
-                    probs = torch.softmax(logits, dim=1)[0]
-                
-                wK_prob = probs[CLASSES.index('wK')].item()
-                bK_prob = probs[CLASSES.index('bK')].item()
-                
-                # Check if this looks like a king
-                if wK_prob > 0.5:
-                    king_candidates.append((wK_prob, x, y, tile_size, 'wK'))
-                if bK_prob > 0.5:
-                    king_candidates.append((bK_prob, x, y, tile_size, 'bK'))
+                # If we got high confidence, we found the right tile size and alignment
+                if ref_prob > 0.75:
+                    print(f"  HIGH CONFIDENCE! Expanding grid from this anchor...")
+                    
+                    # Expand from this anchor
+                    grid_info = expand_grid_from_anchor(
+                        img_bgr, ref_x, ref_y, tile_size, model, debug=True
+                    )
+                    
+                    if grid_info is not None:
+                        # Validate
+                        score, piece_count = score_grid_alignment(
+                            img_bgr, grid_info['left'], grid_info['top'],
+                            tile_size, model
+                        )
+                        
+                        print(f"  Grid: score={score:.1f}, pieces={piece_count}")
+                        
+                        if score > 12 and piece_count >= 2:
+                            x1, y1 = grid_info['left'], grid_info['top']
+                            x2, y2 = grid_info['right'], grid_info['bottom']
+                            
+                            quad = np.array([
+                                [x1, y1],
+                                [x2, y1],
+                                [x2, y2],
+                                [x1, y2],
+                            ], dtype=np.float32)
+                            
+                            elapsed = time.time() - start_time
+                            print(f"[PIECE DETECT] SUCCESS in {elapsed:.2f}s!")
+                            print(f"  Anchor: {pred_class} at ({ref_x},{ref_y}) conf={ref_prob*100:.0f}%")
+                            print(f"  Grid: ({x1},{y1}) to ({x2},{y2}), tile={tile_size}")
+                            print(f"  Classifications: ~{classifications}")
+                            
+                            if debug:
+                                debug_info["success"] = True
+                                debug_info["elapsed_seconds"] = elapsed
+                                debug_info["anchor_piece"] = pred_class
+                                debug_info["anchor_pos"] = (ref_x, ref_y)
+                                debug_info["anchor_confidence"] = ref_prob
+                                debug_info["tile_size"] = tile_size
+                                debug_info["grid"] = grid_info
+                                debug_info["score"] = score
+                            
+                            return quad, debug_info
+            
+            # Timeout check
+            if time.time() - start_time > 15:
+                print(f"[PIECE DETECT] Timeout!")
+                break
+        
+        # Check if we should continue to next tile size
+        if time.time() - start_time > 15:
+            break
     
-    if not king_candidates:
-        if debug:
-            debug_info["message"] = "No kings found in image scan"
-        return None, debug_info
-    
-    # Sort by probability
-    king_candidates.sort(key=lambda x: -x[0])
+    elapsed = time.time() - start_time
+    print(f"[PIECE DETECT] FAILED after {elapsed:.2f}s, ~{classifications} classifications")
     
     if debug:
-        debug_info["king_candidates"] = len(king_candidates)
-        debug_info["best_candidates"] = [
-            {"prob": p, "x": x, "y": y, "tile": t, "type": k}
-            for p, x, y, t, k in king_candidates[:5]
-        ]
+        debug_info["success"] = False
+        debug_info["elapsed_seconds"] = elapsed
     
-    # Use best king to estimate board
-    prob, kx, ky, tile_size, king_type = king_candidates[0]
+    return None, debug_info
+
+
+def find_board_from_kings(img_bgr, model, debug=False):
+    """
+    Try multiple fallback methods to detect the board.
     
-    # King center
-    king_cx = kx + tile_size // 2
-    king_cy = ky + tile_size // 2
+    Methods tried in order:
+    1. High-confidence piece detection - find pieces with >85% confidence,
+       generate board candidates, validate with FEN
+    2. Center-based expansion - start from center, find pieces, expand to grid
+    """
+    print("[FALLBACK] Trying high-confidence piece method...")
+    quad, debug_info = find_board_from_high_confidence_pieces(img_bgr, model, debug)
+    if quad is not None:
+        return quad, debug_info
     
-    # Estimate which square the king is on (assuming standard initial position as hint)
-    # White king usually on e1 or nearby, black king on e8 or nearby
-    # But in practice, king could be anywhere - we'll estimate board covers most of image
+    print("[FALLBACK] Trying center-based expansion method...")
+    quad, debug_info = find_board_from_center(img_bgr, model, debug)
+    if quad is not None:
+        return quad, debug_info
     
-    # Assume board is centered roughly around image center
-    # And tile_size tells us the scale
-    board_size = tile_size * 8
-    
-    # Estimate board center - use image center weighted toward king position
-    img_cx, img_cy = w // 2, h // 2
-    board_cx = (img_cx + king_cx) // 2  # Average of image center and king
-    board_cy = (img_cy + king_cy) // 2
-    
-    # Calculate board corners
-    half_board = board_size // 2
-    x1 = max(0, board_cx - half_board)
-    y1 = max(0, board_cy - half_board)
-    x2 = min(w, board_cx + half_board)
-    y2 = min(h, board_cy + half_board)
-    
-    # Adjust to maintain square aspect
-    actual_w = x2 - x1
-    actual_h = y2 - y1
-    if actual_w != actual_h:
-        size = min(actual_w, actual_h)
-        x2 = x1 + size
-        y2 = y1 + size
-    
-    # Create quad (clockwise from top-left)
-    quad = np.array([
-        [x1, y1],  # top-left
-        [x2, y1],  # top-right
-        [x2, y2],  # bottom-right
-        [x1, y2],  # bottom-left
-    ], dtype=np.float32)
-    
-    if debug:
-        debug_info["estimated_board"] = {
-            "from_king": king_type,
-            "king_pos": (kx, ky),
-            "tile_size": tile_size,
-            "board_corners": quad.tolist()
-        }
-    
-    print(f"[KING FALLBACK] Found {king_type} at ({kx},{ky}) with {prob*100:.1f}% confidence")
-    print(f"[KING FALLBACK] Estimated board: {x1},{y1} to {x2},{y2} (tile_size={tile_size})")
-    
-    return quad, debug_info
+    print("[FALLBACK] All methods failed")
+    return None, debug_info if debug_info else {"method": "all_failed"}
 
 
 def get_piece_probability(warped, row, col, tile_size, model, piece_class):

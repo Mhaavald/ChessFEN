@@ -36,7 +36,7 @@ public class ChessController : ControllerBase
         IFormFile image,
         [FromQuery] bool debug = false,
         [FromQuery] string? model = null,
-        [FromQuery] bool skipDetection = false)
+        [FromQuery(Name = "skip_detection")] bool skipDetection = false)
     {
         if (image == null || image.Length == 0)
         {
@@ -93,7 +93,7 @@ public class ChessController : ControllerBase
         [FromBody] Dictionary<string, string> body,
         [FromQuery] bool debug = false,
         [FromQuery] string? model = null,
-        [FromQuery] bool skipDetection = false)
+        [FromQuery(Name = "skip_detection")] bool skipDetection = false)
     {
         if (!body.TryGetValue("image", out var imageBase64) || string.IsNullOrEmpty(imageBase64))
         {
@@ -144,7 +144,7 @@ public class ChessController : ControllerBase
     [HttpPost("analyze/deep")]
     public async Task<ActionResult<DeepAnalysisResponse>> DeepAnalysis(
         [FromBody] Dictionary<string, string> body,
-        [FromQuery] bool skipDetection = false)
+        [FromQuery(Name = "skip_detection")] bool skipDetection = false)
     {
         if (!body.TryGetValue("image", out var imageBase64) || string.IsNullOrEmpty(imageBase64))
         {
@@ -586,6 +586,143 @@ public class ChessController : ControllerBase
             });
         }
     }
+
+    /// <summary>
+    /// Validate multiple FEN variants against Chess.com to find which one matches real games.
+    /// Used when piece colors are ambiguous (e.g., queen could be white or black).
+    /// </summary>
+    [HttpPost("validate-fen-variants")]
+    public async Task<ActionResult<FenValidationResult>> ValidateFenVariants([FromBody] FenValidationRequest request)
+    {
+        if (request?.FenVariants == null || request.FenVariants.Count < 2)
+        {
+            return BadRequest(new FenValidationResult 
+            { 
+                Success = false, 
+                Error = "At least 2 FEN variants are required" 
+            });
+        }
+
+        try
+        {
+            using var httpClient = new HttpClient();
+            httpClient.DefaultRequestHeaders.Add("User-Agent", 
+                "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36");
+            httpClient.DefaultRequestHeaders.Add("Accept", "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8");
+            httpClient.DefaultRequestHeaders.Add("Accept-Language", "en-US,en;q=0.5");
+
+            var results = new List<FenVariantResult>();
+            string? matchedFen = null;
+            
+            foreach (var variant in request.FenVariants)
+            {
+                var encodedFen = Uri.EscapeDataString(variant.Fen);
+                var url = $"https://www.chess.com/games/search?fen={encodedFen}";
+                
+                var response = await httpClient.GetAsync(url);
+                var html = await response.Content.ReadAsStringAsync();
+                
+                // Check for "no games" message
+                var hasNoGamesMessage = html.Contains("Your search did not match any games", StringComparison.OrdinalIgnoreCase) ||
+                                        html.Contains("did not match any games", StringComparison.OrdinalIgnoreCase);
+                
+                // Check for game indicators
+                var gamesFound = !hasNoGamesMessage && (
+                    html.Contains("master-games-master-game", StringComparison.OrdinalIgnoreCase) ||
+                    html.Contains("master-games-username", StringComparison.OrdinalIgnoreCase) ||
+                    html.Contains("archived-games-game-row", StringComparison.OrdinalIgnoreCase) ||
+                    html.Contains("/game/live/", StringComparison.OrdinalIgnoreCase) ||
+                    html.Contains("/game/daily/", StringComparison.OrdinalIgnoreCase));
+                
+                results.Add(new FenVariantResult
+                {
+                    Fen = variant.Fen,
+                    Label = variant.Label,
+                    GamesFound = gamesFound,
+                    SearchUrl = url
+                });
+                
+                _logger.LogInformation("FEN variant validation: {Label} -> GamesFound={GamesFound}", 
+                    variant.Label, gamesFound);
+                
+                if (gamesFound && matchedFen == null)
+                {
+                    matchedFen = variant.Fen;
+                }
+                
+                // Small delay between requests to be nice to Chess.com
+                await Task.Delay(200);
+            }
+            
+            // Determine recommendation
+            var matchingVariants = results.Where(r => r.GamesFound).ToList();
+            string recommendation;
+            
+            if (matchingVariants.Count == 1)
+            {
+                recommendation = $"Use '{matchingVariants[0].Label}' - it matches games on Chess.com";
+            }
+            else if (matchingVariants.Count > 1)
+            {
+                recommendation = "Multiple variants match games - position is ambiguous";
+            }
+            else
+            {
+                recommendation = "No variants match games on Chess.com - position may be from an ongoing game";
+            }
+
+            return Ok(new FenValidationResult
+            {
+                Success = true,
+                Variants = results,
+                MatchedFen = matchedFen,
+                Recommendation = recommendation
+            });
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Error validating FEN variants");
+            return Ok(new FenValidationResult
+            {
+                Success = false,
+                Error = ex.Message
+            });
+        }
+    }
+}
+
+/// <summary>
+/// Request to validate multiple FEN variants
+/// </summary>
+public class FenValidationRequest
+{
+    public List<FenVariant> FenVariants { get; set; } = new();
+}
+
+public class FenVariant
+{
+    public string Fen { get; set; } = "";
+    public string Label { get; set; } = "";
+}
+
+/// <summary>
+/// Result from FEN variant validation
+/// </summary>
+public class FenValidationResult
+{
+    public bool Success { get; set; }
+    public List<FenVariantResult>? Variants { get; set; }
+    public string? MatchedFen { get; set; }
+    public string? Recommendation { get; set; }
+    public string? Error { get; set; }
+}
+
+public class FenVariantResult
+{
+    public string Fen { get; set; } = "";
+    public string Label { get; set; } = "";
+    public bool GamesFound { get; set; }
+    public string SearchUrl { get; set; } = "";
 }
 
 /// <summary>
