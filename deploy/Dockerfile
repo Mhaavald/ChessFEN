@@ -3,13 +3,14 @@
 
 FROM mcr.microsoft.com/dotnet/aspnet:8.0 AS base
 
-# Install Python 3.11 and nginx
+# Install Python 3.11, nginx, and utilities
 RUN apt-get update && apt-get install -y \
     python3.11 \
     python3.11-venv \
     python3-pip \
     nginx \
     supervisor \
+    curl \
     && rm -rf /var/lib/apt/lists/*
 
 # Create symlink for python
