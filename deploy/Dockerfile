@@ -23,7 +23,7 @@ COPY src/inference/ /app/inference/
 COPY models/ /app/models/
 
 # Install Python dependencies
-RUN python -m pip install --no-cache-dir -r /app/inference/requirements.txt
+RUN python -m pip install --no-cache-dir --break-system-packages -r /app/inference/requirements.txt
 
 # Build .NET API
 FROM mcr.microsoft.com/dotnet/sdk:8.0 AS build
