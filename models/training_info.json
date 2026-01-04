@@ -1,0 +1,26 @@
+{
+  "timestamp": "2026-01-02T13:24:55.607285",
+  "epochs": 50,
+  "batch_size": 32,
+  "learning_rate": 0.0005,
+  "img_size": 64,
+  "train_samples": 7556,
+  "val_samples": 1333,
+  "best_val_acc": 0.9932483120780196,
+  "best_epoch": 5,
+  "classes": [
+    "empty",
+    "wP",
+    "wN",
+    "wB",
+    "wR",
+    "wQ",
+    "wK",
+    "bP",
+    "bN",
+    "bB",
+    "bR",
+    "bQ",
+    "bK"
+  ]
+}
