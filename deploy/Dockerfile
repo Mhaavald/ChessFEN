@@ -21,8 +21,9 @@ RUN ln -sf /usr/bin/python3.11 /usr/bin/python
 # Set up working directory
 WORKDIR /app
 
-# Copy Python inference service
+# Copy Python inference service and scripts
 COPY src/inference/ /app/inference/
+COPY scripts/ /app/scripts/
 COPY models/ /app/models/
 
 # Install Python dependencies
