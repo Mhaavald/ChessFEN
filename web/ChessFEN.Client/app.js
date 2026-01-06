@@ -1377,27 +1377,33 @@ checkAdminAccess();
 // ============================================
 
 async function loadVersion() {
+    const versionEl = document.getElementById('versionInfo');
+    if (!versionEl) return;
+
     try {
         const response = await fetch(`${CONFIG.API_BASE}/version`);
         if (response.ok) {
             const versionData = await response.json();
-            const versionEl = document.getElementById('versionInfo');
-            if (versionEl) {
-                const buildDate = new Date(versionData.timestamp);
-                const formattedDate = buildDate.toLocaleString('en-US', {
-                    year: 'numeric',
-                    month: 'short',
-                    day: 'numeric',
-                    hour: '2-digit',
-                    minute: '2-digit'
-                });
+            const buildDate = new Date(versionData.timestamp);
+            const formattedDate = buildDate.toLocaleString('en-US', {
+                year: 'numeric',
+                month: 'short',
+                day: 'numeric',
+                hour: '2-digit',
+                minute: '2-digit'
+            });
 
-                versionEl.textContent = `v${versionData.version} (${versionData.build})`;
-                versionEl.title = `Version: ${versionData.version}\nBuild: ${versionData.build}\nDeployed: ${formattedDate}\nCommit: ${versionData.commit}`;
-            }
+            versionEl.textContent = `v${versionData.version} (${versionData.build})`;
+            versionEl.title = `Version: ${versionData.version}\nBuild: ${versionData.build}\nDeployed: ${formattedDate}\nCommit: ${versionData.commit}`;
+        } else {
+            console.error('Version fetch failed:', response.status, response.statusText);
+            versionEl.textContent = 'Version unavailable';
+            versionEl.title = `Failed to load version: ${response.status}`;
         }
     } catch (error) {
-        console.log('Could not load version info:', error);
+        console.error('Could not load version info:', error);
+        versionEl.textContent = 'Version unavailable';
+        versionEl.title = `Error loading version: ${error.message}`;
     }
 }
 
