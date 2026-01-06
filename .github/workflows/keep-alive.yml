@@ -1,0 +1,52 @@
+name: Keep Container App Alive
+
+on:
+  schedule:
+    # Run every 10 minutes during working hours (8 AM - 6 PM UTC, Monday-Friday)
+    # UTC times: 08:00-18:00 = approximately 9 AM - 7 PM CET (adjust based on your timezone)
+
+    # Weekdays: full user-active window
+    - cron: '*/10 13-22 * * 1-5'
+
+    # Weekends: shorter window (later start)
+    - cron: '*/10 15-22 * * 0,6'
+
+  workflow_dispatch:  # Allow manual trigger
+
+jobs:
+  keep-alive:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Get current time
+        id: time
+        run: |
+          echo "Current time: $(date)"
+          echo "UTC time: $(date -u)"
+
+      - name: Ping Container App
+        run: |
+          echo "Sending keep-alive request to ChessFEN app..."
+
+          # Get the app URL
+          APP_URL="https://chessfen-app.purplebush-aedf58d9.westeurope.azurecontainerapps.io"
+
+          # Try to access the health/status endpoint (doesn't require auth)
+          # If your app has a health check endpoint, use that
+          # Otherwise, try the base URL which will redirect to login
+
+          RESPONSE=$(curl -s -o /dev/null -w "%{http_code}" -L "$APP_URL" || echo "000")
+
+          echo "Response status: $RESPONSE"
+
+          if [[ "$RESPONSE" =~ ^(200|302|401)$ ]]; then
+            echo "✅ Container app is alive (HTTP $RESPONSE)"
+          else
+            echo "⚠️  Unexpected response: HTTP $RESPONSE"
+            echo "Container may be cold starting, this is normal"
+          fi
+
+      - name: Log activity
+        run: |
+          echo "Keep-alive ping completed at $(date)"
+          echo "Next ping will occur in ~10 minutes (if within schedule)"
