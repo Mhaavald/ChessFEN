@@ -6,6 +6,7 @@
 // Configuration (can be overridden by config.js)
 const CONFIG = {
     API_BASE: window.APP_CONFIG?.API_BASE || 'http://localhost:5001/api/chess',
+    DOTNET_API_BASE: window.APP_CONFIG?.DOTNET_API_BASE || 'http://localhost:5001/api/chess',
     CHESS_COM_SEARCH_URL: window.APP_CONFIG?.CHESS_COM_SEARCH_URL || 'https://www.chess.com/games/search',
     CHESS_COM_ANALYSIS_URL: 'https://www.chess.com/analysis',
     CHESS_COM_PLAY_URL: 'https://www.chess.com/analysis',
@@ -362,7 +363,7 @@ async function analyzeBoard() {
         if (model) queryParams.push(`model=${model}`);
         const query = '?' + queryParams.join('&');
         
-        const url = `${CONFIG.API_BASE}/predict/base64${query}`;
+        const url = `${CONFIG.API_BASE}/predict${query}`;
         console.log('Calling API:', url);
         
         const response = await fetch(url, {
@@ -1340,7 +1341,7 @@ async function checkForGames() {
 
 async function checkChessCom(fen) {
     const encodedFen = encodeURIComponent(fen);
-    const response = await fetch(`${CONFIG.API_BASE}/chess-com-search?fen=${encodedFen}`);
+    const response = await fetch(`${CONFIG.DOTNET_API_BASE}/chess-com-search?fen=${encodedFen}`);
 
     if (!response.ok) {
         throw new Error(`API error: ${response.status}`);

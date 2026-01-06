@@ -44,7 +44,7 @@ from detect_board import detect_board_quad_grid_aware, warp_quad
 from piece_detect import suggest_grid_adjustment, draw_piece_detection_overlay
 
 app = Flask(__name__)
-CORS(app)
+CORS(app, supports_credentials=True)
 
 # ============================
 # Configuration
