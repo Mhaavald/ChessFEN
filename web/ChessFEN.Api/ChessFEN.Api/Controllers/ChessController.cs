@@ -100,7 +100,7 @@ public class ChessController : ControllerBase
             using var streamContent = new StreamContent(stream);
             content.Add(streamContent, "image", image.FileName);
 
-            var response = await client.PostAsync($"/api/predict{query}", content);
+            var response = await client.PostAsync($"/api/chess/predict{query}", content);
             var json = await response.Content.ReadAsStringAsync();
 
             var result = JsonSerializer.Deserialize<PredictionResponse>(json, new JsonSerializerOptions
@@ -157,7 +157,7 @@ public class ChessController : ControllerBase
             var payload = JsonSerializer.Serialize(new { image = imageBase64 });
             var content = new StringContent(payload, Encoding.UTF8, "application/json");
 
-            var response = await client.PostAsync($"/api/predict{query}", content);
+            var response = await client.PostAsync($"/api/chess/predict{query}", content);
             var json = await response.Content.ReadAsStringAsync();
 
             var result = JsonSerializer.Deserialize<PredictionResponse>(json, new JsonSerializerOptions
@@ -204,7 +204,7 @@ public class ChessController : ControllerBase
             var content = new StringContent(payload, Encoding.UTF8, "application/json");
 
             // Call multi-model prediction
-            var response = await client.PostAsync($"/api/predict/multi{query}", content);
+            var response = await client.PostAsync($"/api/chess/predict/multi{query}", content);
             var json = await response.Content.ReadAsStringAsync();
 
             var multiResult = JsonSerializer.Deserialize<JsonElement>(json);
@@ -351,7 +351,7 @@ public class ChessController : ControllerBase
         try
         {
             var client = _httpClientFactory.CreateClient("InferenceService");
-            var response = await client.GetAsync("/api/models");
+            var response = await client.GetAsync("/api/chess/models");
             var json = await response.Content.ReadAsStringAsync();
 
             var models = JsonSerializer.Deserialize<List<ModelVersion>>(json, new JsonSerializerOptions
@@ -384,7 +384,7 @@ public class ChessController : ControllerBase
             var payload = JsonSerializer.Serialize(new { model_name = request.ModelName });
             var content = new StringContent(payload, Encoding.UTF8, "application/json");
 
-            var response = await client.PostAsync("/api/models/select", content);
+            var response = await client.PostAsync("/api/chess/models/select", content);
             var json = await response.Content.ReadAsStringAsync();
 
             return Ok(JsonSerializer.Deserialize<object>(json));
@@ -429,7 +429,7 @@ public class ChessController : ControllerBase
             });
             var content = new StringContent(payload, Encoding.UTF8, "application/json");
 
-            var response = await client.PostAsync("/api/feedback", content);
+            var response = await client.PostAsync("/api/chess/feedback", content);
             var json = await response.Content.ReadAsStringAsync();
 
             var result = JsonSerializer.Deserialize<FeedbackResponse>(json, new JsonSerializerOptions
@@ -463,7 +463,7 @@ public class ChessController : ControllerBase
         try
         {
             var client = _httpClientFactory.CreateClient("InferenceService");
-            var response = await client.GetAsync("/api/feedback");
+            var response = await client.GetAsync("/api/chess/feedback");
             var json = await response.Content.ReadAsStringAsync();
 
             var items = JsonSerializer.Deserialize<List<FeedbackItem>>(json, new JsonSerializerOptions
@@ -493,7 +493,7 @@ public class ChessController : ControllerBase
         try
         {
             var client = _httpClientFactory.CreateClient("InferenceService");
-            var response = await client.GetAsync("/api/admin/statistics");
+            var response = await client.GetAsync("/api/chess/admin/statistics");
             var json = await response.Content.ReadAsStringAsync();
 
             var stats = JsonSerializer.Deserialize<AdminStatisticsResponse>(json, new JsonSerializerOptions
@@ -656,7 +656,7 @@ public class ChessController : ControllerBase
             var payload = JsonSerializer.Serialize(new { image = imageBase64, skip_detection = skipDetection });
             var content = new StringContent(payload, Encoding.UTF8, "application/json");
 
-            var response = await client.PostAsync("/api/align", content);
+            var response = await client.PostAsync("/api/chess/align", content);
             var json = await response.Content.ReadAsStringAsync();
 
             var result = JsonSerializer.Deserialize<GridAlignmentResult>(json, new JsonSerializerOptions
