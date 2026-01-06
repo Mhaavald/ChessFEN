@@ -1970,6 +1970,22 @@ def health():
     """Health check endpoint."""
     return jsonify({"status": "ok", "model": _current_model_name})
 
+@app.route('/api/version', methods=['GET'])
+def version():
+    """Get application version information."""
+    version_file = REPO_ROOT / "version.json"
+    if version_file.exists():
+        with open(version_file) as f:
+            version_info = json.load(f)
+        return jsonify(version_info)
+    else:
+        return jsonify({
+            "version": "unknown",
+            "build": "unknown",
+            "timestamp": "unknown",
+            "commit": "unknown"
+        })
+
 
 @app.route('/api/models', methods=['GET'])
 def list_models():

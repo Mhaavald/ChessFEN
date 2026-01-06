@@ -987,3 +987,30 @@ body {
     border-radius: var(--radius-sm);
 }
 
+/* Version Info */
+.version-info {
+    position: fixed;
+    bottom: 8px;
+    right: 8px;
+    font-size: 0.7rem;
+    color: var(--text-muted);
+    background: rgba(255, 255, 255, 0.8);
+    padding: 4px 8px;
+    border-radius: var(--radius-sm);
+    backdrop-filter: blur(4px);
+    z-index: 100;
+    cursor: help;
+    transition: opacity 0.2s;
+}
+
+.version-info:hover {
+    opacity: 0.8;
+}
+
+@media (max-width: 640px) {
+    .version-info {
+        font-size: 0.65rem;
+        padding: 3px 6px;
+    }
+}
+

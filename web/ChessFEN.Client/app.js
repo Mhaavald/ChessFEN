@@ -1371,3 +1371,35 @@ async function checkAdminAccess() {
 
 // Check admin access on page load
 checkAdminAccess();
+
+// ============================================
+// Version Display
+// ============================================
+
+async function loadVersion() {
+    try {
+        const response = await fetch(`${CONFIG.API_BASE}/version`);
+        if (response.ok) {
+            const versionData = await response.json();
+            const versionEl = document.getElementById('versionInfo');
+            if (versionEl) {
+                const buildDate = new Date(versionData.timestamp);
+                const formattedDate = buildDate.toLocaleString('en-US', {
+                    year: 'numeric',
+                    month: 'short',
+                    day: 'numeric',
+                    hour: '2-digit',
+                    minute: '2-digit'
+                });
+
+                versionEl.textContent = `v${versionData.version} (${versionData.build})`;
+                versionEl.title = `Version: ${versionData.version}\nBuild: ${versionData.build}\nDeployed: ${formattedDate}\nCommit: ${versionData.commit}`;
+            }
+        }
+    } catch (error) {
+        console.log('Could not load version info:', error);
+    }
+}
+
+// Load version on page load
+loadVersion();

@@ -25,6 +25,7 @@ WORKDIR /app
 COPY src/inference/ /app/inference/
 COPY scripts/ /app/scripts/
 COPY models/ /app/models/
+COPY version.json /app/version.json
 
 # Install Python dependencies
 RUN python -m pip install --no-cache-dir --break-system-packages -r /app/inference/requirements.txt

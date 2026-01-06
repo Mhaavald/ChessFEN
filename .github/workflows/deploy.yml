@@ -6,6 +6,15 @@ on:
       - main
       - feature/add-authentication
   workflow_dispatch:
+    inputs:
+      major:
+        description: 'Major version'
+        required: false
+        default: '1'
+      minor:
+        description: 'Minor version'
+        required: false
+        default: '0'
 
 env:
   AZURE_CONTAINER_REGISTRY: chessfenacr.azurecr.io
@@ -13,6 +22,9 @@ env:
   RESOURCE_GROUP: rg-chessfen
   CONTAINER_APP_NAME: chessfen-app
   CONTAINER_APP_ENV: chessfen-env
+  # Version: Major.Minor set here, Patch auto-increments from commit count
+  VERSION_MAJOR: ${{ github.event.inputs.major || '0' }}
+  VERSION_MINOR: ${{ github.event.inputs.minor || '1' }}
 
 jobs:
   build-and-deploy:
@@ -23,6 +35,49 @@ jobs:
         uses: actions/checkout@v4
         with:
           lfs: true
+          fetch-depth: 0  # Fetch all history for commit count
+
+      - name: Calculate version
+        id: version
+        run: |
+          # Get commit count as patch version (auto-incrementing)
+          PATCH_VERSION=$(git rev-list --count HEAD)
+
+          # Build full semantic version
+          VERSION="${{ env.VERSION_MAJOR }}.${{ env.VERSION_MINOR }}.${PATCH_VERSION}"
+
+          # Get git commit hash
+          COMMIT_HASH=$(git rev-parse --short HEAD)
+
+          # Build number with timestamp
+          BUILD_NUMBER=$(date -u +"%Y%m%d-%H%M%S")
+
+          # ISO timestamp
+          TIMESTAMP=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
+
+          echo "version=${VERSION}" >> $GITHUB_OUTPUT
+          echo "patch=${PATCH_VERSION}" >> $GITHUB_OUTPUT
+          echo "commit=${COMMIT_HASH}" >> $GITHUB_OUTPUT
+          echo "build=${BUILD_NUMBER}" >> $GITHUB_OUTPUT
+          echo "timestamp=${TIMESTAMP}" >> $GITHUB_OUTPUT
+
+          echo "📦 Version: ${VERSION}"
+          echo "🔨 Build: ${BUILD_NUMBER}"
+          echo "📝 Commit: ${COMMIT_HASH}"
+
+      - name: Update version.json
+        run: |
+          cat > version.json <<EOF
+          {
+            "version": "${{ steps.version.outputs.version }}",
+            "build": "${{ steps.version.outputs.build }}",
+            "timestamp": "${{ steps.version.outputs.timestamp }}",
+            "commit": "${{ steps.version.outputs.commit }}"
+          }
+          EOF
+
+          echo "✅ Updated version.json:"
+          cat version.json
 
       - name: Login to Azure
         uses: azure/login@v2
@@ -35,26 +90,45 @@ jobs:
 
       - name: Build and push container image
         run: |
-          docker build -f deploy/Dockerfile -t ${{ env.AZURE_CONTAINER_REGISTRY }}/${{ env.CONTAINER_NAME }}:${{ github.sha }} -t ${{ env.AZURE_CONTAINER_REGISTRY }}/${{ env.CONTAINER_NAME }}:latest .
+          docker build -f deploy/Dockerfile \
+            -t ${{ env.AZURE_CONTAINER_REGISTRY }}/${{ env.CONTAINER_NAME }}:${{ steps.version.outputs.version }} \
+            -t ${{ env.AZURE_CONTAINER_REGISTRY }}/${{ env.CONTAINER_NAME }}:${{ steps.version.outputs.build }} \
+            -t ${{ env.AZURE_CONTAINER_REGISTRY }}/${{ env.CONTAINER_NAME }}:${{ github.sha }} \
+            -t ${{ env.AZURE_CONTAINER_REGISTRY }}/${{ env.CONTAINER_NAME }}:latest \
+            .
+
+          echo "✅ Built images with tags:"
+          echo "  - Version: ${{ steps.version.outputs.version }}"
+          echo "  - Build: ${{ steps.version.outputs.build }}"
+          echo "  - SHA: ${{ github.sha }}"
+          echo "  - latest"
+
+          docker push ${{ env.AZURE_CONTAINER_REGISTRY }}/${{ env.CONTAINER_NAME }}:${{ steps.version.outputs.version }}
+          docker push ${{ env.AZURE_CONTAINER_REGISTRY }}/${{ env.CONTAINER_NAME }}:${{ steps.version.outputs.build }}
           docker push ${{ env.AZURE_CONTAINER_REGISTRY }}/${{ env.CONTAINER_NAME }}:${{ github.sha }}
           docker push ${{ env.AZURE_CONTAINER_REGISTRY }}/${{ env.CONTAINER_NAME }}:latest
 
+          echo "✅ Pushed all image tags to registry"
+
       - name: Deploy to Container Apps
         run: |
+          # Use version-tagged image for deployment
+          IMAGE_TAG="${{ env.AZURE_CONTAINER_REGISTRY }}/${{ env.CONTAINER_NAME }}:${{ steps.version.outputs.build }}"
+
           # Check if app exists
           if az containerapp show --name ${{ env.CONTAINER_APP_NAME }} --resource-group ${{ env.RESOURCE_GROUP }} &> /dev/null; then
-            echo "Updating existing Container App..."
+            echo "Updating existing Container App to ${IMAGE_TAG}..."
             az containerapp update \
               --name ${{ env.CONTAINER_APP_NAME }} \
               --resource-group ${{ env.RESOURCE_GROUP }} \
-              --image ${{ env.AZURE_CONTAINER_REGISTRY }}/${{ env.CONTAINER_NAME }}:${{ github.sha }}
+              --image ${IMAGE_TAG}
           else
-            echo "Creating new Container App..."
+            echo "Creating new Container App with ${IMAGE_TAG}..."
             az containerapp create \
               --name ${{ env.CONTAINER_APP_NAME }} \
               --resource-group ${{ env.RESOURCE_GROUP }} \
               --environment ${{ env.CONTAINER_APP_ENV }} \
-              --image ${{ env.AZURE_CONTAINER_REGISTRY }}/${{ env.CONTAINER_NAME }}:${{ github.sha }} \
+              --image ${IMAGE_TAG} \
               --registry-server ${{ env.AZURE_CONTAINER_REGISTRY }} \
               --target-port 80 \
               --ingress external \
@@ -67,8 +141,22 @@ jobs:
               --scale-rule-http-concurrency 10
           fi
 
-      - name: Get Container App URL
+          echo "✅ Deployed image: ${IMAGE_TAG}"
+
+      - name: Get Container App URL and Create Summary
         run: |
           URL=$(az containerapp show --name ${{ env.CONTAINER_APP_NAME }} --resource-group ${{ env.RESOURCE_GROUP }} --query "properties.configuration.ingress.fqdn" -o tsv)
           echo "🚀 Deployed to: https://$URL"
-          echo "DEPLOY_URL=https://$URL" >> $GITHUB_ENV
+
+          # Create deployment summary
+          echo "## 🚀 Deployment Complete" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "| Property | Value |" >> $GITHUB_STEP_SUMMARY
+          echo "|----------|-------|" >> $GITHUB_STEP_SUMMARY
+          echo "| Version | \`${{ steps.version.outputs.version }}\` |" >> $GITHUB_STEP_SUMMARY
+          echo "| Build | \`${{ steps.version.outputs.build }}\` |" >> $GITHUB_STEP_SUMMARY
+          echo "| Commit | \`${{ steps.version.outputs.commit }}\` |" >> $GITHUB_STEP_SUMMARY
+          echo "| Image | \`${{ env.AZURE_CONTAINER_REGISTRY }}/${{ env.CONTAINER_NAME }}:${{ steps.version.outputs.build }}\` |" >> $GITHUB_STEP_SUMMARY
+          echo "| URL | https://$URL |" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "✅ Application deployed successfully!" >> $GITHUB_STEP_SUMMARY
