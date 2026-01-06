@@ -52,7 +52,7 @@ CORS(app, supports_credentials=True)
 
 MODELS_DIR = REPO_ROOT / "models"
 FEEDBACK_DIR = REPO_ROOT / "data" / "user_feedback"
-PREDICTIONS_DIR = REPO_ROOT / "data" / "predictions"
+PREDICTIONS_DIR = REPO_ROOT / "data" / "user_feedback" / "predictions"  # Inside persistent storage
 MODEL_VERSIONS_FILE = MODELS_DIR / "versions.json"
 
 # Warped board resolution - use 640 for 80x80 tiles to match training data
