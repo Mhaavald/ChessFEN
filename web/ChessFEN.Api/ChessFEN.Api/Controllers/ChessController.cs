@@ -481,6 +481,39 @@ public class ChessController : ControllerBase
     }
 
     /// <summary>
+    /// Get user statistics (admin endpoint)
+    /// </summary>
+    [HttpGet("admin/statistics")]
+    public async Task<ActionResult<AdminStatisticsResponse>> GetStatistics()
+    {
+        // Check admin authorization
+        var authResult = CheckAuthorization(requireAdmin: true);
+        if (authResult != null) return authResult;
+
+        try
+        {
+            var client = _httpClientFactory.CreateClient("InferenceService");
+            var response = await client.GetAsync("/api/admin/statistics");
+            var json = await response.Content.ReadAsStringAsync();
+
+            var stats = JsonSerializer.Deserialize<AdminStatisticsResponse>(json, new JsonSerializerOptions
+            {
+                PropertyNameCaseInsensitive = true
+            });
+
+            _logger.LogInformation("Admin statistics requested. Total users: {UniqueUsers}, Total corrections: {TotalCorrections}",
+                stats?.UniqueUsers, stats?.TotalCorrections);
+
+            return Ok(stats);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Error getting statistics");
+            return StatusCode(500, new { error = ex.Message });
+        }
+    }
+
+    /// <summary>
     /// Check if games exist on Chess.com for a given FEN
     /// </summary>
     [HttpGet("chess-com-search")]

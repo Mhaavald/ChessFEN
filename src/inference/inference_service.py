@@ -2138,6 +2138,67 @@ def list_feedback():
     return jsonify(get_pending_feedback())
 
 
+def get_user_statistics():
+    """Calculate user statistics from feedback data."""
+    if not FEEDBACK_DIR.exists():
+        return {
+            "total_predictions": 0,
+            "total_corrections": 0,
+            "users": []
+        }
+
+    # Aggregate statistics by user
+    user_stats = {}
+
+    for json_file in FEEDBACK_DIR.glob("*.json"):
+        try:
+            with open(json_file) as f:
+                feedback = json.load(f)
+
+            user_email = feedback.get('user_email', 'Unknown')
+            user_id = feedback.get('user_id', 'unknown')
+
+            if user_email not in user_stats:
+                user_stats[user_email] = {
+                    "email": user_email,
+                    "user_id": user_id,
+                    "corrections_count": 0,
+                    "first_activity": feedback.get('timestamp'),
+                    "last_activity": feedback.get('timestamp')
+                }
+
+            user_stats[user_email]["corrections_count"] += 1
+
+            # Update activity timestamps
+            timestamp = feedback.get('timestamp')
+            if timestamp:
+                if timestamp < user_stats[user_email]["first_activity"]:
+                    user_stats[user_email]["first_activity"] = timestamp
+                if timestamp > user_stats[user_email]["last_activity"]:
+                    user_stats[user_email]["last_activity"] = timestamp
+
+        except Exception as e:
+            print(f"[STATS] Error processing {json_file}: {e}")
+            continue
+
+    # Convert to list and sort by corrections count
+    users_list = sorted(user_stats.values(),
+                       key=lambda x: x['corrections_count'],
+                       reverse=True)
+
+    return {
+        "total_corrections": sum(u['corrections_count'] for u in users_list),
+        "unique_users": len(users_list),
+        "users": users_list
+    }
+
+
+@app.route('/api/admin/statistics', methods=['GET'])
+def admin_statistics():
+    """Get user statistics (admin endpoint)."""
+    return jsonify(get_user_statistics())
+
+
 @app.route('/api/align', methods=['POST'])
 def align_grid():
     """

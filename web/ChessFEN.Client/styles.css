@@ -51,6 +51,7 @@ body {
 .header {
     text-align: center;
     padding: 24px 0;
+    position: relative;
 }
 
 .header h1 {
@@ -62,6 +63,24 @@ body {
 .subtitle {
     color: var(--text-muted);
     font-size: 0.9rem;
+}
+
+.admin-link {
+    position: absolute;
+    top: 24px;
+    right: 0;
+    color: var(--text-muted);
+    text-decoration: none;
+    font-size: 0.85rem;
+    padding: 6px 12px;
+    border-radius: var(--radius-sm);
+    background: var(--border);
+    transition: all 0.2s;
+}
+
+.admin-link:hover {
+    background: var(--secondary);
+    color: white;
 }
 
 /* Cards */

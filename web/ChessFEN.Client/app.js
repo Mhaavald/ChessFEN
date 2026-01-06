@@ -1340,10 +1340,33 @@ async function checkForGames() {
 async function checkChessCom(fen) {
     const encodedFen = encodeURIComponent(fen);
     const response = await fetch(`${CONFIG.API_BASE}/chess-com-search?fen=${encodedFen}`);
-    
+
     if (!response.ok) {
         throw new Error(`API error: ${response.status}`);
     }
-    
+
     return await response.json();
 }
+
+// Check if user is admin and show admin link
+async function checkAdminAccess() {
+    try {
+        const response = await fetch(`${CONFIG.API_BASE}/admin/statistics`, {
+            credentials: 'include'
+        });
+
+        if (response.ok) {
+            // User has admin access, show the admin link
+            const adminLink = document.getElementById('adminLink');
+            if (adminLink) {
+                adminLink.style.display = 'block';
+            }
+        }
+    } catch (error) {
+        // Silently fail - user is not admin
+        console.log('Not an admin user');
+    }
+}
+
+// Check admin access on page load
+checkAdminAccess();

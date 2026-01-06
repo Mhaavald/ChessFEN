@@ -177,3 +177,37 @@ public class ClientPrincipalClaim
     public string? Typ { get; set; }  // Claim type (e.g., "groups", "name", "email")
     public string? Val { get; set; }  // Claim value
 }
+
+/// <summary>
+/// User statistics for admin dashboard
+/// </summary>
+public class UserStatistics
+{
+    public string? Email { get; set; }
+
+    [JsonPropertyName("user_id")]
+    public string? UserId { get; set; }
+
+    [JsonPropertyName("corrections_count")]
+    public int CorrectionsCount { get; set; }
+
+    [JsonPropertyName("first_activity")]
+    public string? FirstActivity { get; set; }
+
+    [JsonPropertyName("last_activity")]
+    public string? LastActivity { get; set; }
+}
+
+/// <summary>
+/// Admin statistics response
+/// </summary>
+public class AdminStatisticsResponse
+{
+    [JsonPropertyName("total_corrections")]
+    public int TotalCorrections { get; set; }
+
+    [JsonPropertyName("unique_users")]
+    public int UniqueUsers { get; set; }
+
+    public List<UserStatistics>? Users { get; set; }
+}

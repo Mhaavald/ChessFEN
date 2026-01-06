@@ -112,13 +112,13 @@ public class AuthorizationHelper
         var allowedDomains = _configuration.GetSection("Authorization:AllowedDomains")
             .Get<string[]>() ?? Array.Empty<string>();
 
-        // Get admin domains from configuration
-        var adminDomains = _configuration.GetSection("Authorization:AdminDomains")
+        // Get admin emails from configuration
+        var adminEmails = _configuration.GetSection("Authorization:AdminEmails")
             .Get<string[]>() ?? Array.Empty<string>();
 
-        // Check admin domains first
-        isAdmin = adminDomains.Any(domain =>
-            email.EndsWith($"@{domain}", StringComparison.OrdinalIgnoreCase));
+        // Check if user is admin by exact email match
+        isAdmin = adminEmails.Any(adminEmail =>
+            email.Equals(adminEmail, StringComparison.OrdinalIgnoreCase));
 
         if (isAdmin)
             return true; // Admins always have access
