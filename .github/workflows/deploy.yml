@@ -16,6 +16,10 @@ on:
         required: false
         default: '0'
 
+concurrency:
+  group: deploy-${{ github.ref }}
+  cancel-in-progress: true
+
 env:
   AZURE_CONTAINER_REGISTRY: chessfenacr.azurecr.io
   CONTAINER_NAME: chessfen
