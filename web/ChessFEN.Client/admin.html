@@ -209,6 +209,10 @@
 
             <div class="stats-grid">
                 <div class="stat-card">
+                    <h3>Total Predictions</h3>
+                    <div class="value" id="totalPredictions">0</div>
+                </div>
+                <div class="stat-card">
                     <h3>Total Corrections</h3>
                     <div class="value" id="totalCorrections">0</div>
                 </div>
@@ -217,8 +221,8 @@
                     <div class="value" id="uniqueUsers">0</div>
                 </div>
                 <div class="stat-card">
-                    <h3>Avg per User</h3>
-                    <div class="value" id="avgPerUser">0</div>
+                    <h3>Inference Success</h3>
+                    <div class="value" id="inferenceSuccess">-</div>
                 </div>
             </div>
 
@@ -280,13 +284,19 @@
 
         function displayStatistics(data) {
             // Update summary stats
-            document.getElementById('totalCorrections').textContent = data.totalCorrections || 0;
+            const totalPredictions = data.totalPredictions || 0;
+            const validFenCount = data.valid_fen_count || data.validFenCount || 0;
+            const totalCorrections = data.totalCorrections || 0;
+
+            document.getElementById('totalPredictions').textContent = totalPredictions;
+            document.getElementById('totalCorrections').textContent = totalCorrections;
             document.getElementById('uniqueUsers').textContent = data.uniqueUsers || 0;
 
-            const avgPerUser = data.uniqueUsers > 0
-                ? (data.totalCorrections / data.uniqueUsers).toFixed(1)
-                : 0;
-            document.getElementById('avgPerUser').textContent = avgPerUser;
+            // Calculate inference success rate (valid FEN / total predictions)
+            const inferenceSuccess = totalPredictions > 0
+                ? ((validFenCount / totalPredictions) * 100).toFixed(1) + '%'
+                : '-';
+            document.getElementById('inferenceSuccess').textContent = inferenceSuccess;
 
             // Update user table
             const tbody = document.getElementById('userTableBody');

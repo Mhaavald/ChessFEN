@@ -1076,6 +1076,7 @@ async function submitCorrections() {
         const response = await fetch(`${CONFIG.API_BASE}/feedback`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
+            credentials: 'include',
             body: JSON.stringify(payload)
         });
         

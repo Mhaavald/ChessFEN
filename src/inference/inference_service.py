@@ -52,6 +52,7 @@ CORS(app)
 
 MODELS_DIR = REPO_ROOT / "models"
 FEEDBACK_DIR = REPO_ROOT / "data" / "user_feedback"
+PREDICTIONS_DIR = REPO_ROOT / "data" / "predictions"
 MODEL_VERSIONS_FILE = MODELS_DIR / "versions.json"
 
 # Warped board resolution - use 640 for 80x80 tiles to match training data
@@ -1677,16 +1678,53 @@ def detect_board_with_validation(img_bgr, model, debug=False):
     return None, None, None, None, None, debug_info
 
 
+def validate_fen(fen: str) -> bool:
+    """
+    Validate a FEN string (board position only, not full FEN).
+
+    Returns True if the FEN is valid (8 rows, 8 squares each, exactly 1 king per side).
+    """
+    try:
+        rows = fen.split('/')
+
+        if len(rows) != 8:
+            return False
+
+        white_kings = 0
+        black_kings = 0
+
+        for row in rows:
+            count = 0
+            for char in row:
+                if char.isdigit():
+                    count += int(char)
+                elif char in 'pnbrqkPNBRQK':
+                    count += 1
+                    if char == 'K':
+                        white_kings += 1
+                    elif char == 'k':
+                        black_kings += 1
+                else:
+                    return False
+
+            if count != 8:
+                return False
+
+        # Must have exactly 1 king per side
+        return white_kings == 1 and black_kings == 1
+    except Exception:
+        return False
+
 def predict_board(img_bgr, model, debug=False, skip_detection=False):
     """
     Detect board, classify pieces, return FEN and optional debug images.
-    
+
     Args:
         img_bgr: Input image in BGR format
         model: PyTorch model for classification
         debug: Include debug images in result
         skip_detection: If True, treat the entire image as the board (skip detection/warp)
-    
+
     Returns:
         dict with keys: fen, board (2D list), success, error, debug_images (if debug=True)
     """
@@ -1816,6 +1854,62 @@ def image_to_base64(img_rgb):
 # ============================
 # Feedback Storage
 # ============================
+
+def get_user_info_from_headers():
+    """Extract user information from Azure AD authentication headers."""
+    try:
+        # Azure Container Apps Easy Auth provides user info in X-MS-CLIENT-PRINCIPAL header
+        principal_header = request.headers.get('X-MS-CLIENT-PRINCIPAL')
+        if principal_header:
+            # Decode base64 encoded JSON
+            principal_json = base64.b64decode(principal_header).decode('utf-8')
+            principal = json.loads(principal_json)
+
+            user_id = principal.get('userId') or principal.get('sub')
+            user_email = None
+
+            # Extract email from claims
+            claims = principal.get('claims', [])
+            for claim in claims:
+                if claim.get('typ') in ['emails', 'email', 'preferred_username']:
+                    user_email = claim.get('val')
+                    break
+
+            # Fallback: use name if no email found
+            if not user_email:
+                user_email = principal.get('userDetails') or user_id
+
+            print(f"[AUTH] Extracted user: {user_email} (ID: {user_id})")
+            return user_id, user_email
+    except Exception as e:
+        print(f"[AUTH] Error extracting user info: {e}")
+
+    return None, None
+
+def log_prediction(user_id: str = None, user_email: str = None, fen: str = None, valid_fen: bool = False):
+    """Log a prediction event for statistics tracking."""
+    try:
+        PREDICTIONS_DIR.mkdir(parents=True, exist_ok=True)
+
+        timestamp = datetime.now().isoformat()
+        prediction_log = {
+            "timestamp": timestamp,
+            "user_id": user_id,
+            "user_email": user_email,
+            "valid_fen": valid_fen,
+            "fen": fen
+        }
+
+        # Append to daily log file
+        date_str = datetime.now().strftime("%Y-%m-%d")
+        log_file = PREDICTIONS_DIR / f"{date_str}.jsonl"
+
+        with open(log_file, 'a') as f:
+            f.write(json.dumps(prediction_log) + '\n')
+
+        print(f"[PREDICTION] Logged prediction for user: {user_email} ({user_id}), valid_fen: {valid_fen}")
+    except Exception as e:
+        print(f"[PREDICTION] Error logging prediction: {e}")
 
 def save_feedback(original_fen: str, corrected_fen: str, image_base64: str,
                   corrected_squares: dict, model_name: str,
@@ -1984,14 +2078,21 @@ def predict():
     print(f"[PREDICT] Running prediction on image {img_bgr.shape}, skip_detection={skip_detection}")
     # Run prediction
     result = predict_board(img_bgr, model, debug=debug, skip_detection=skip_detection)
-    
+
     # Convert debug images to base64
     if debug and result.get("debug_images"):
         for key, img in result["debug_images"].items():
             result["debug_images"][key] = image_to_base64(img)
-    
+
     result["model"] = _current_model_name
-    
+
+    # Log prediction for statistics (only if successful)
+    if result.get("success"):
+        user_id, user_email = get_user_info_from_headers()
+        fen = result.get("fen")
+        valid_fen = validate_fen(fen) if fen else False
+        log_prediction(user_id, user_email, fen, valid_fen)
+
     return jsonify(result)
 
 
@@ -2119,14 +2220,17 @@ def submit_feedback():
     if not data:
         return jsonify({"error": "No JSON data received"}), 400
 
+    # Extract user info from Azure AD authentication headers
+    user_id, user_email = get_user_info_from_headers()
+
     feedback_id = save_feedback(
         original_fen=data.get('original_fen'),
         corrected_fen=data.get('corrected_fen'),
         image_base64=data.get('image'),
         corrected_squares=data.get('corrected_squares', {}),
         model_name=_current_model_name,
-        user_id=data.get('user_id'),
-        user_email=data.get('user_email')
+        user_id=user_id,
+        user_email=user_email
     )
     
     return jsonify({"success": True, "feedback_id": feedback_id})
@@ -2139,11 +2243,31 @@ def list_feedback():
 
 
 def get_user_statistics():
-    """Calculate user statistics from feedback data."""
+    """Calculate user statistics from feedback data and prediction logs."""
+    # Count predictions and valid FENs from log files
+    total_predictions = 0
+    valid_fen_count = 0
+    if PREDICTIONS_DIR.exists():
+        for log_file in PREDICTIONS_DIR.glob("*.jsonl"):
+            try:
+                with open(log_file, 'r') as f:
+                    for line in f:
+                        total_predictions += 1
+                        try:
+                            log_entry = json.loads(line)
+                            if log_entry.get('valid_fen', False):
+                                valid_fen_count += 1
+                        except json.JSONDecodeError:
+                            continue
+            except Exception as e:
+                print(f"[STATS] Error counting predictions in {log_file}: {e}")
+
     if not FEEDBACK_DIR.exists():
         return {
-            "total_predictions": 0,
+            "total_predictions": total_predictions,
+            "valid_fen_count": valid_fen_count,
             "total_corrections": 0,
+            "unique_users": 0,
             "users": []
         }
 
@@ -2187,6 +2311,8 @@ def get_user_statistics():
                        reverse=True)
 
     return {
+        "total_predictions": total_predictions,
+        "valid_fen_count": valid_fen_count,
         "total_corrections": sum(u['corrections_count'] for u in users_list),
         "unique_users": len(users_list),
         "users": users_list
