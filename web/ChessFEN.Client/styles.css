@@ -67,7 +67,7 @@ body {
 
 .admin-link {
     position: absolute;
-    top: 24px;
+    top: 0;
     right: 0;
     color: var(--text-muted);
     text-decoration: none;
@@ -81,6 +81,19 @@ body {
 .admin-link:hover {
     background: var(--secondary);
     color: white;
+}
+
+/* Responsive: move admin link below header on small screens */
+@media (max-width: 640px) {
+    .header {
+        padding-bottom: 48px;
+    }
+
+    .admin-link {
+        position: static;
+        display: inline-block;
+        margin-top: 12px;
+    }
 }
 
 /* Cards */

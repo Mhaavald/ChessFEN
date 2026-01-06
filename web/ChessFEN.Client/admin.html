@@ -240,9 +240,8 @@
         </div>
     </div>
 
-    <script type="module">
-        import { API_BASE_URL } from './config.js';
-
+    <script src="config.js"></script>
+    <script>
         let statisticsData = null;
 
         async function loadStatistics() {
@@ -255,7 +254,7 @@
             errorDiv.style.display = 'none';
 
             try {
-                const response = await fetch(`${API_BASE_URL}/api/chess/admin/statistics`, {
+                const response = await fetch(`${window.APP_CONFIG.API_BASE}/admin/statistics`, {
                     credentials: 'include'
                 });
 
