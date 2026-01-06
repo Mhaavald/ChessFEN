@@ -136,10 +136,44 @@ public class SquareDisagreement
 /// </summary>
 public class FeedbackItem
 {
-    public required string Id { get; set; }
-    public required string Timestamp { get; set; }
-    public required string ModelName { get; set; }
-    public required string OriginalFen { get; set; }
-    public required string CorrectedFen { get; set; }
+    public string? Id { get; set; }
+    public string? Timestamp { get; set; }
+
+    [JsonPropertyName("model_name")]
+    public string? ModelName { get; set; }
+
+    [JsonPropertyName("original_fen")]
+    public string? OriginalFen { get; set; }
+
+    [JsonPropertyName("corrected_fen")]
+    public string? CorrectedFen { get; set; }
+
+    [JsonPropertyName("corrected_squares")]
     public Dictionary<string, string>? CorrectedSquares { get; set; }
+
+    [JsonPropertyName("user_id")]
+    public string? UserId { get; set; }
+
+    [JsonPropertyName("user_email")]
+    public string? UserEmail { get; set; }
+}
+
+/// <summary>
+/// Azure Container Apps authentication principal from X-MS-CLIENT-PRINCIPAL header
+/// </summary>
+public class ClientPrincipal
+{
+    public string? IdentityProvider { get; set; }
+    public string? UserId { get; set; }
+    public string? UserDetails { get; set; }  // Email address
+    public IEnumerable<ClientPrincipalClaim>? Claims { get; set; }
+}
+
+/// <summary>
+/// Claim from Azure Container Apps authentication
+/// </summary>
+public class ClientPrincipalClaim
+{
+    public string? Typ { get; set; }  // Claim type (e.g., "groups", "name", "email")
+    public string? Val { get; set; }  // Claim value
 }

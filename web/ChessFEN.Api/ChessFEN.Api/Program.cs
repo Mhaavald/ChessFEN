@@ -1,5 +1,6 @@
 using System.Text.Json;
 using System.Text.Json.Serialization;
+using ChessFEN.Api.Services;
 
 var builder = WebApplication.CreateBuilder(args);
 
@@ -16,6 +17,9 @@ builder.Services.AddControllers()
 
 builder.Services.AddEndpointsApiExplorer();
 builder.Services.AddSwaggerGen();
+
+// Register authorization helper
+builder.Services.AddSingleton<AuthorizationHelper>();
 builder.Services.AddCors(options =>
 {
     options.AddDefaultPolicy(policy =>
@@ -41,6 +45,33 @@ if (app.Environment.IsDevelopment())
 {
     app.UseSwagger();
     app.UseSwaggerUI();
+
+    // Mock authentication for local development
+    app.Use(async (context, next) =>
+    {
+        if (!context.Request.Headers.ContainsKey("X-MS-CLIENT-PRINCIPAL"))
+        {
+            var mockPrincipal = new
+            {
+                identityProvider = "aad",
+                userId = "dev-user-12345",
+                userDetails = "developer@localhost.dev",
+                claims = new[]
+                {
+                    new { typ = "name", val = "Local Developer" },
+                    new { typ = "email", val = "developer@localhost.dev" }
+                }
+            };
+
+            var json = JsonSerializer.Serialize(mockPrincipal);
+            var base64 = Convert.ToBase64String(System.Text.Encoding.UTF8.GetBytes(json));
+            context.Request.Headers["X-MS-CLIENT-PRINCIPAL"] = base64;
+
+            Console.WriteLine($"[DEV AUTH] Mocked user: {mockPrincipal.userDetails}");
+        }
+
+        await next();
+    });
 }
 
 app.UseCors();

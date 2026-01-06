@@ -1817,14 +1817,15 @@ def image_to_base64(img_rgb):
 # Feedback Storage
 # ============================
 
-def save_feedback(original_fen: str, corrected_fen: str, image_base64: str, 
-                  corrected_squares: dict, model_name: str):
+def save_feedback(original_fen: str, corrected_fen: str, image_base64: str,
+                  corrected_squares: dict, model_name: str,
+                  user_id: str = None, user_email: str = None):
     """Save user correction feedback for later retraining."""
     FEEDBACK_DIR.mkdir(parents=True, exist_ok=True)
-    
+
     feedback_id = str(uuid.uuid4())[:8]
     timestamp = datetime.now().isoformat()
-    
+
     feedback = {
         "id": feedback_id,
         "timestamp": timestamp,
@@ -1832,20 +1833,24 @@ def save_feedback(original_fen: str, corrected_fen: str, image_base64: str,
         "original_fen": original_fen,
         "corrected_fen": corrected_fen,
         "corrected_squares": corrected_squares,  # e.g., {"a1": "wR", "b2": "empty"}
+        "user_id": user_id,
+        "user_email": user_email,
     }
-    
+
     # Save feedback JSON
     feedback_file = FEEDBACK_DIR / f"{feedback_id}.json"
     with open(feedback_file, 'w') as f:
         json.dump(feedback, f, indent=2)
-    
+
     # Save original image
     if image_base64:
         img_data = base64.b64decode(image_base64)
         img_file = FEEDBACK_DIR / f"{feedback_id}.png"
         with open(img_file, 'wb') as f:
             f.write(img_data)
-    
+
+    print(f"[FEEDBACK] Saved feedback {feedback_id} from user: {user_email} ({user_id})")
+
     return feedback_id
 
 
@@ -2101,23 +2106,27 @@ def predict_multi():
 def submit_feedback():
     """
     Submit user correction feedback.
-    
+
     Request:
         - original_fen: string
         - corrected_fen: string
         - image: base64 encoded image
         - corrected_squares: dict of {square: piece} corrections
+        - user_id: string (from Azure AD)
+        - user_email: string (from Azure AD)
     """
     data = request.json
     if not data:
         return jsonify({"error": "No JSON data received"}), 400
-    
+
     feedback_id = save_feedback(
         original_fen=data.get('original_fen'),
         corrected_fen=data.get('corrected_fen'),
         image_base64=data.get('image'),
         corrected_squares=data.get('corrected_squares', {}),
-        model_name=_current_model_name
+        model_name=_current_model_name,
+        user_id=data.get('user_id'),
+        user_email=data.get('user_email')
     )
     
     return jsonify({"success": True, "feedback_id": feedback_id})

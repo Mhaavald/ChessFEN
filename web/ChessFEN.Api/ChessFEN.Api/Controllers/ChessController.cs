@@ -1,5 +1,6 @@
 using Microsoft.AspNetCore.Mvc;
 using ChessFEN.Api.Models;
+using ChessFEN.Api.Services;
 using System.Text;
 using System.Text.Json;
 
@@ -12,15 +13,46 @@ public class ChessController : ControllerBase
     private readonly IHttpClientFactory _httpClientFactory;
     private readonly ILogger<ChessController> _logger;
     private readonly IConfiguration _configuration;
+    private readonly AuthorizationHelper _authHelper;
 
     public ChessController(
-        IHttpClientFactory httpClientFactory, 
+        IHttpClientFactory httpClientFactory,
         ILogger<ChessController> logger,
-        IConfiguration configuration)
+        IConfiguration configuration,
+        AuthorizationHelper authHelper)
     {
         _httpClientFactory = httpClientFactory;
         _logger = logger;
         _configuration = configuration;
+        _authHelper = authHelper;
+    }
+
+    /// <summary>
+    /// Check if user is authorized to access this endpoint
+    /// </summary>
+    private ActionResult? CheckAuthorization(bool requireAdmin = false)
+    {
+        var userContext = _authHelper.GetUserContext(Request);
+
+        if (!userContext.IsAuthenticated)
+        {
+            _logger.LogWarning("Unauthorized access attempt - not authenticated");
+            return Unauthorized(new { error = "Authentication required", message = userContext.Message });
+        }
+
+        if (!userContext.HasAccess)
+        {
+            _logger.LogWarning("Forbidden access attempt - User: {Email}", userContext.Email);
+            return StatusCode(403, new { error = "Access denied", message = userContext.Message });
+        }
+
+        if (requireAdmin && !userContext.IsAdmin)
+        {
+            _logger.LogWarning("Admin access denied - User: {Email}", userContext.Email);
+            return StatusCode(403, new { error = "Admin access required" });
+        }
+
+        return null; // Authorized
     }
 
     /// <summary>
@@ -38,12 +70,16 @@ public class ChessController : ControllerBase
         [FromQuery] string? model = null,
         [FromQuery(Name = "skip_detection")] bool skipDetection = false)
     {
+        // Check authorization
+        var authResult = CheckAuthorization();
+        if (authResult != null) return authResult;
+
         if (image == null || image.Length == 0)
         {
-            return BadRequest(new PredictionResponse 
-            { 
-                Success = false, 
-                Error = "No image provided" 
+            return BadRequest(new PredictionResponse
+            {
+                Success = false,
+                Error = "No image provided"
             });
         }
 
@@ -95,12 +131,16 @@ public class ChessController : ControllerBase
         [FromQuery] string? model = null,
         [FromQuery(Name = "skip_detection")] bool skipDetection = false)
     {
+        // Check authorization
+        var authResult = CheckAuthorization();
+        if (authResult != null) return authResult;
+
         if (!body.TryGetValue("image", out var imageBase64) || string.IsNullOrEmpty(imageBase64))
         {
-            return BadRequest(new PredictionResponse 
-            { 
-                Success = false, 
-                Error = "No image provided" 
+            return BadRequest(new PredictionResponse
+            {
+                Success = false,
+                Error = "No image provided"
             });
         }
 
@@ -329,11 +369,15 @@ public class ChessController : ControllerBase
     }
 
     /// <summary>
-    /// Select model to use for inference
+    /// Select model to use for inference (admin only)
     /// </summary>
     [HttpPost("models/select")]
     public async Task<ActionResult> SelectModel([FromBody] SelectModelRequest request)
     {
+        // Check admin authorization
+        var authResult = CheckAuthorization(requireAdmin: true);
+        if (authResult != null) return authResult;
+
         try
         {
             var client = _httpClientFactory.CreateClient("InferenceService");
@@ -358,21 +402,30 @@ public class ChessController : ControllerBase
     [HttpPost("feedback")]
     public async Task<ActionResult<FeedbackResponse>> SubmitFeedback([FromBody] FeedbackRequest? request)
     {
+        // Check authorization
+        var authResult = CheckAuthorization();
+        if (authResult != null) return authResult;
+
         if (request == null)
         {
             return BadRequest(new FeedbackResponse { Success = false, Error = "Request body is required" });
         }
-        
+
         try
         {
+            // Get user context to include in feedback
+            var userContext = _authHelper.GetUserContext(Request);
+
             var client = _httpClientFactory.CreateClient("InferenceService");
-            
+
             var payload = JsonSerializer.Serialize(new
             {
                 original_fen = request.OriginalFen,
                 corrected_fen = request.CorrectedFen,
                 image = request.Image,
-                corrected_squares = request.CorrectedSquares
+                corrected_squares = request.CorrectedSquares,
+                user_id = userContext.UserId,
+                user_email = userContext.Email
             });
             var content = new StringContent(payload, Encoding.UTF8, "application/json");
 
@@ -403,6 +456,10 @@ public class ChessController : ControllerBase
     [HttpGet("feedback")]
     public async Task<ActionResult<List<FeedbackItem>>> GetFeedback()
     {
+        // Check admin authorization
+        var authResult = CheckAuthorization(requireAdmin: true);
+        if (authResult != null) return authResult;
+
         try
         {
             var client = _httpClientFactory.CreateClient("InferenceService");
