@@ -33,3 +33,4 @@ Thumbs.db
 
 # Noise
 server-pids.json
+.claude/
