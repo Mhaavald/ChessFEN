@@ -1971,7 +1971,6 @@ def health():
     return jsonify({"status": "ok", "model": _current_model_name})
 
 @app.route('/api/chess/version', methods=['GET'])
-@app.route('/api/version', methods=['GET'])  # Keep old path for compatibility
 def version():
     """Get application version information."""
     version_file = REPO_ROOT / "version.json"
@@ -1988,13 +1987,13 @@ def version():
         })
 
 
-@app.route('/api/models', methods=['GET'])
+@app.route('/api/chess/models', methods=['GET'])
 def list_models():
     """List available model versions."""
     return jsonify(get_model_versions())
 
 
-@app.route('/api/models/select', methods=['POST'])
+@app.route('/api/chess/models/select', methods=['POST'])
 def select_model():
     """Select a model to use for inference."""
     data = request.json
@@ -2007,7 +2006,7 @@ def select_model():
         return jsonify({"success": False, "error": str(e)}), 400
 
 
-@app.route('/api/predict', methods=['POST'])
+@app.route('/api/chess/predict', methods=['POST'])
 def predict():
     """
     Predict FEN from chess board image.
@@ -2113,7 +2112,7 @@ def predict():
     return jsonify(result)
 
 
-@app.route('/api/predict/multi', methods=['POST'])
+@app.route('/api/chess/predict/multi', methods=['POST'])
 def predict_multi():
     """
     Run prediction with ALL available models and compare results.
@@ -2220,7 +2219,7 @@ def predict_multi():
     })
 
 
-@app.route('/api/feedback', methods=['POST'])
+@app.route('/api/chess/feedback', methods=['POST'])
 def submit_feedback():
     """
     Submit user correction feedback.
@@ -2253,7 +2252,7 @@ def submit_feedback():
     return jsonify({"success": True, "feedback_id": feedback_id})
 
 
-@app.route('/api/feedback', methods=['GET'])
+@app.route('/api/chess/feedback', methods=['GET'])
 def list_feedback():
     """List pending feedback items (admin endpoint)."""
     return jsonify(get_pending_feedback())
@@ -2336,13 +2335,13 @@ def get_user_statistics():
     }
 
 
-@app.route('/api/admin/statistics', methods=['GET'])
+@app.route('/api/chess/admin/statistics', methods=['GET'])
 def admin_statistics():
     """Get user statistics (admin endpoint)."""
     return jsonify(get_user_statistics())
 
 
-@app.route('/api/align', methods=['POST'])
+@app.route('/api/chess/align', methods=['POST'])
 def align_grid():
     """
     Analyze an image to detect the board, warp it, and show piece positions for grid alignment.
