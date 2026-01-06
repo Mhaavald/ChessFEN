@@ -6,10 +6,10 @@ on:
     # UTC times: 08:00-18:00 = approximately 9 AM - 7 PM CET (adjust based on your timezone)
 
     # Weekdays: full user-active window
-    - cron: '*/10 13-22 * * 1-5'
+    - cron: '*/4 13-22 * * 1-5'
 
     # Weekends: shorter window (later start)
-    - cron: '*/10 15-22 * * 0,6'
+    - cron: '*/4 15-22 * * 0,6'
 
   workflow_dispatch:  # Allow manual trigger
 
