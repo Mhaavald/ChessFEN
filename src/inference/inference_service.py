@@ -1970,7 +1970,8 @@ def health():
     """Health check endpoint."""
     return jsonify({"status": "ok", "model": _current_model_name})
 
-@app.route('/api/version', methods=['GET'])
+@app.route('/api/chess/version', methods=['GET'])
+@app.route('/api/version', methods=['GET'])  # Keep old path for compatibility
 def version():
     """Get application version information."""
     version_file = REPO_ROOT / "version.json"
