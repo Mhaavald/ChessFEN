@@ -49,6 +49,16 @@ public class AuthorizationHelper
             var userId = principal.UserId;
             var email = principal.UserDetails;
 
+            // If UserDetails is null or doesn't contain @, try to get email from claims
+            if (string.IsNullOrEmpty(email) || !email.Contains("@"))
+            {
+                email = principal.Claims?.FirstOrDefault(c =>
+                    c.Typ?.Equals("email", StringComparison.OrdinalIgnoreCase) == true ||
+                    c.Typ?.Equals("emails", StringComparison.OrdinalIgnoreCase) == true ||
+                    c.Typ?.Equals("preferred_username", StringComparison.OrdinalIgnoreCase) == true
+                )?.Val;
+            }
+
             // Check if email domain is allowed
             var hasAccess = IsEmailDomainAllowed(email, out bool isAdmin);
 
