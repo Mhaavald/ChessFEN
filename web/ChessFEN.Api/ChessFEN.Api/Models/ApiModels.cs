@@ -203,6 +203,12 @@ public class UserStatistics
 /// </summary>
 public class AdminStatisticsResponse
 {
+    [JsonPropertyName("total_predictions")]
+    public int TotalPredictions { get; set; }
+
+    [JsonPropertyName("valid_fen_count")]
+    public int ValidFenCount { get; set; }
+
     [JsonPropertyName("total_corrections")]
     public int TotalCorrections { get; set; }
 
