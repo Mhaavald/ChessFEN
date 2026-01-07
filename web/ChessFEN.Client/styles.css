@@ -1076,3 +1076,32 @@ body {
     border-top: 1px solid var(--border);
 }
 
+/* Captured Board Toggle */
+.captured-board-toggle {
+    margin-top: 16px;
+    text-align: center;
+    border-top: 1px solid var(--border);
+    padding-top: 16px;
+}
+
+.captured-board-toggle h4 {
+    font-size: 0.9rem;
+    color: var(--text-muted);
+    margin-bottom: 8px;
+    font-weight: 500;
+}
+
+.captured-board-toggle .captured-board-image {
+    max-width: 320px;
+    width: 100%;
+    border-radius: var(--radius-sm);
+    border: 2px solid var(--border);
+    box-shadow: var(--shadow);
+}
+
+@media (min-width: 640px) {
+    .captured-board-toggle .captured-board-image {
+        max-width: 384px;
+    }
+}
+

@@ -5,7 +5,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
     <title>Chess FEN Scanner</title>
     <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>♔</text></svg>">
-    <link rel="stylesheet" href="styles.css?v=10">
+    <link rel="stylesheet" href="styles.css?v=11">
 </head>
 <body>
     <div class="app">
@@ -68,7 +68,14 @@
                     <div class="board-actions">
                         <button class="btn btn-sm btn-outline" id="editBoardBtn" title="Edit position">✏️ Edit</button>
                         <button class="btn btn-sm btn-outline" id="resetBoardBtn" title="Reset to original" hidden>↩️ Reset</button>
+                        <button class="btn btn-sm btn-outline" id="showCapturedBtn" title="Show captured board" hidden>📷 Compare</button>
                     </div>
+                </div>
+
+                <!-- Captured Board (toggle) -->
+                <div class="captured-board-toggle" id="capturedBoardToggle" hidden>
+                    <h4>Captured Board</h4>
+                    <img id="capturedBoardImage" class="captured-board-image" alt="Captured board">
                 </div>
 
                 <!-- Piece Palette (for editing) -->
@@ -220,7 +227,7 @@
         </footer>
     </div>
 
-    <script src="config.js?v=10"></script>
-    <script src="app.js?v=10"></script>
+    <script src="config.js?v=11"></script>
+    <script src="app.js?v=11"></script>
 </body>
 </html>

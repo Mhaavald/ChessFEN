@@ -81,6 +81,9 @@ function cacheElements() {
     // Board editing elements
     elements.editBoardBtn = document.getElementById('editBoardBtn');
     elements.resetBoardBtn = document.getElementById('resetBoardBtn');
+    elements.showCapturedBtn = document.getElementById('showCapturedBtn');
+    elements.capturedBoardToggle = document.getElementById('capturedBoardToggle');
+    elements.capturedBoardImage = document.getElementById('capturedBoardImage');
     elements.piecePalette = document.getElementById('piecePalette');
     elements.correctionNotice = document.getElementById('correctionNotice');
     elements.correctionCount = document.getElementById('correctionCount');
@@ -116,6 +119,7 @@ function bindEvents() {
     elements.editBoardBtn.addEventListener('click', toggleEditMode);
     elements.resetBoardBtn.addEventListener('click', resetBoard);
     elements.submitCorrectionsBtn.addEventListener('click', submitCorrections);
+    elements.showCapturedBtn.addEventListener('click', toggleCapturedBoard);
     
     // Check for games
     // Game check is now automatic - no button event needed
@@ -592,10 +596,16 @@ async function displayResults() {
     
     // Auto-check for games
     checkForGames();
-    
+
     // Update edit UI
     updateEditUI();
-    
+
+    // Show/hide Compare button based on whether we have an image to compare
+    const hasImage = state.warpedImageBase64 || state.imageBase64;
+    elements.showCapturedBtn.hidden = !hasImage;
+    elements.capturedBoardToggle.hidden = true;
+    elements.showCapturedBtn.textContent = '📷 Compare';
+
     showSection('results');
 }
 
@@ -825,6 +835,8 @@ function resetToInput() {
 
     elements.editBoardBtn.textContent = '✏️ Edit';
     elements.piecePalette.hidden = true;
+    elements.capturedBoardToggle.hidden = true;
+    elements.showCapturedBtn.textContent = '📷 Compare';
 
     // Show the preview again if an image is still loaded
     if (state.imageBase64) {
@@ -1002,6 +1014,24 @@ function pieceToFenChar(piece) {
         'bP': 'p', 'bN': 'n', 'bB': 'b', 'bR': 'r', 'bQ': 'q', 'bK': 'k'
     };
     return map[piece] || '';
+}
+
+function toggleCapturedBoard() {
+    const isVisible = !elements.capturedBoardToggle.hidden;
+
+    if (isVisible) {
+        // Hide it
+        elements.capturedBoardToggle.hidden = true;
+        elements.showCapturedBtn.textContent = '📷 Compare';
+    } else {
+        // Show it - use warped image if available, otherwise original
+        const imageToShow = state.warpedImageBase64 || state.imageBase64;
+        if (imageToShow) {
+            elements.capturedBoardImage.src = `data:image/jpeg;base64,${imageToShow}`;
+            elements.capturedBoardToggle.hidden = false;
+            elements.showCapturedBtn.textContent = '📷 Hide';
+        }
+    }
 }
 
 async function submitCorrections() {
