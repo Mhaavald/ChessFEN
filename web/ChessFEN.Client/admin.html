@@ -283,14 +283,15 @@
         }
 
         function displayStatistics(data) {
-            // Update summary stats
-            const totalPredictions = data.totalPredictions || 0;
+            // Update summary stats - handle both snake_case (Python) and camelCase (.NET)
+            const totalPredictions = data.total_predictions || data.totalPredictions || 0;
             const validFenCount = data.valid_fen_count || data.validFenCount || 0;
-            const totalCorrections = data.totalCorrections || 0;
+            const totalCorrections = data.total_corrections || data.totalCorrections || 0;
+            const uniqueUsers = data.unique_users || data.uniqueUsers || 0;
 
             document.getElementById('totalPredictions').textContent = totalPredictions;
             document.getElementById('totalCorrections').textContent = totalCorrections;
-            document.getElementById('uniqueUsers').textContent = data.uniqueUsers || 0;
+            document.getElementById('uniqueUsers').textContent = uniqueUsers;
 
             // Calculate inference success rate (valid FEN / total predictions)
             const inferenceSuccess = totalPredictions > 0
@@ -314,13 +315,16 @@
                 emailCell.innerHTML = `<span class="user-email">${user.email || 'Unknown'}</span>`;
 
                 const correctionsCell = document.createElement('td');
-                correctionsCell.innerHTML = `<span class="corrections-badge">${user.correctionsCount || 0}</span>`;
+                const corrections = user.corrections_count || user.correctionsCount || 0;
+                correctionsCell.innerHTML = `<span class="corrections-badge">${corrections}</span>`;
 
                 const firstActivityCell = document.createElement('td');
-                firstActivityCell.innerHTML = `<span class="date-text">${formatDate(user.firstActivity)}</span>`;
+                const firstActivity = user.first_activity || user.firstActivity;
+                firstActivityCell.innerHTML = `<span class="date-text">${formatDate(firstActivity)}</span>`;
 
                 const lastActivityCell = document.createElement('td');
-                lastActivityCell.innerHTML = `<span class="date-text">${formatDate(user.lastActivity)}</span>`;
+                const lastActivity = user.last_activity || user.lastActivity;
+                lastActivityCell.innerHTML = `<span class="date-text">${formatDate(lastActivity)}</span>`;
 
                 row.appendChild(emailCell);
                 row.appendChild(correctionsCell);
