@@ -5,64 +5,39 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
     <title>Chess FEN Scanner</title>
     <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>♔</text></svg>">
-    <link rel="stylesheet" href="styles.css?v=6">
+    <link rel="stylesheet" href="styles.css?v=10">
 </head>
 <body>
     <div class="app">
-        <!-- Header -->
-        <header class="header">
-            <h1>♔ Chess FEN Scanner</h1>
-            <p class="subtitle">Scan a chess position, get the FEN, find games</p>
-            <a href="admin.html" class="admin-link" id="adminLink" style="display: none;">Admin Dashboard</a>
-        </header>
-
         <!-- Main Content -->
         <main class="main">
-            <!-- Step 1: Image Input -->
-            <section class="card" id="inputSection">
-                <h2>1. Capture or Upload Board Image</h2>
-                
+            <!-- Image Input -->
+            <section class="card card-compact" id="inputSection">
                 <div class="input-options">
-                    <button class="btn btn-primary btn-large" id="cameraBtn">
-                        📸 Open Camera
+                    <button class="btn btn-primary" id="cameraBtn">
+                        📸 Camera
                     </button>
                     <span class="or-divider">or</span>
-                    <label class="btn btn-secondary btn-large file-label">
-                        📁 Choose File
+                    <label class="btn btn-secondary file-label">
+                        📁 File
                         <input type="file" id="fileInput" accept="image/*" hidden>
                     </label>
+                    <button class="btn btn-success" id="analyzeBtn" disabled>
+                        🔍 Analyze
+                    </button>
                 </div>
-
-                <!-- Image Preview -->
-                <div class="preview-container" id="previewContainer" hidden>
-                    <img id="previewImage" alt="Board preview">
-                    <button class="btn btn-icon btn-clear" id="clearBtn" title="Clear">✕</button>
-                </div>
-
-                <!-- Options -->
-                <div class="options" id="optionsPanel" hidden>
+                <!-- Skip Detection Option -->
+                <div class="skip-detection-row" id="optionsPanel" hidden>
                     <label class="checkbox-label">
                         <input type="checkbox" id="skipDetection">
-                        <span>Image is board only (skip detection)</span>
+                        <span>Skip board detection</span>
                     </label>
-                    <div class="model-select">
-                        <label for="modelSelect">Model:</label>
-                        <select id="modelSelect">
-                            <option value="">Default (ResNet18)</option>
-                        </select>
-                    </div>
                 </div>
-
-                <!-- Analyze Buttons -->
-                <div class="analyze-buttons">
-                    <button class="btn btn-success btn-large" id="analyzeBtn" disabled>
-                        🔍 Quick Analyze
-                    </button>
-                    <button class="btn btn-primary btn-large" id="deepAnalyzeBtn" disabled>
-                        🔬 Deep Analysis
-                    </button>
+                <!-- Hidden elements for state management -->
+                <div id="previewContainer" hidden>
+                    <img id="previewImage" alt="Board preview" style="display:none">
+                    <button class="btn btn-icon btn-clear" id="clearBtn" title="Clear">✕</button>
                 </div>
-                <p class="hint">Deep Analysis uses all models and checks Chess.com for games</p>
             </section>
 
             <!-- Loading State -->
@@ -77,28 +52,22 @@
                 </div>
             </section>
 
-            <!-- Step 2: Results -->
+            <!-- Results -->
             <section class="card" id="resultsSection" hidden>
-                <h2>2. Results</h2>
+                <!-- Position Status -->
+                <div class="fen-container">
+                    <div class="fen-status" id="fenStatus"></div>
+                    <p class="fen-hint" id="fenHint" hidden>Inspect the board and edit if needed</p>
+                </div>
 
-                <!-- Boards side by side -->
-                <div class="boards-row">
-                    <!-- Captured Board Image -->
-                    <div class="captured-board-container" id="capturedBoardContainer" hidden>
-                        <h3>📸 Captured</h3>
-                        <img id="capturedBoardImage" alt="Captured board" class="captured-board-image">
+                <!-- Board Display -->
+                <div class="predicted-board-container">
+                    <div class="board-wrapper">
+                        <table class="chess-board" id="chessBoard"></table>
                     </div>
-
-                    <!-- Board Display -->
-                    <div class="predicted-board-container">
-                        <h3 id="predictedBoardTitle" hidden>♟️ Predicted</h3>
-                        <div class="board-wrapper">
-                            <table class="chess-board" id="chessBoard"></table>
-                        </div>
-                        <div class="board-actions">
-                            <button class="btn btn-sm btn-outline" id="editBoardBtn" title="Edit position">✏️ Edit</button>
-                            <button class="btn btn-sm btn-outline" id="resetBoardBtn" title="Reset to original" hidden>↩️ Reset</button>
-                        </div>
+                    <div class="board-actions">
+                        <button class="btn btn-sm btn-outline" id="editBoardBtn" title="Edit position">✏️ Edit</button>
+                        <button class="btn btn-sm btn-outline" id="resetBoardBtn" title="Reset to original" hidden>↩️ Reset</button>
                     </div>
                 </div>
 
@@ -130,24 +99,6 @@
                 <div class="correction-notice" id="correctionNotice" hidden>
                     <span class="correction-text">📝 <span id="correctionCount">0</span> corrections made</span>
                     <button class="btn btn-sm btn-success" id="submitCorrectionsBtn">✅ Submit for Training</button>
-                </div>
-
-                <!-- Deep Analysis Results -->
-                <div class="deep-analysis-results" id="deepAnalysisResults" hidden>
-                    <h3>🔬 Deep Analysis Results</h3>
-                    <div class="consensus-status" id="consensusStatus"></div>
-                    <div class="games-status" id="gamesStatus"></div>
-                    <div class="model-results" id="modelResultsList"></div>
-                    <div class="disagreements" id="disagreementsList"></div>
-                </div>
-
-                <!-- FEN Display -->
-                <div class="fen-container">
-                    <div class="fen-status" id="fenStatus"></div>
-                    <div class="fen-display">
-                        <input type="text" id="fenInput" readonly>
-                        <button class="btn btn-icon" id="copyFenBtn" title="Copy FEN">📋</button>
-                    </div>
                 </div>
 
                 <!-- Analyze on Chess.com -->
@@ -241,11 +192,35 @@
         <!-- Toast Notification -->
         <div class="toast" id="toast" hidden></div>
 
-        <!-- Version Info -->
-        <div class="version-info" id="versionInfo">Loading version...</div>
+        <!-- FAQ Section -->
+        <section class="card faq-section">
+            <h3>FAQ</h3>
+            <details>
+                <summary>I get "board not detected"</summary>
+                <p>Make sure the lighting is good and the image is as sharp as possible. If it still doesn't work, try cropping the image along the edges of the board and select "Skip board detection".</p>
+            </details>
+            <details>
+                <summary>I get question marks on the resulting board</summary>
+                <p>Question marks indicate uncertain predictions. Check against your image and edit the board if needed.</p>
+            </details>
+            <details>
+                <summary>The game does not exist on Chess.com</summary>
+                <p>Some games are not uploaded to Chess.com, though most should be available.</p>
+            </details>
+            <details>
+                <summary>Why can I analyze or play as both white and black?</summary>
+                <p>The position comes with whose turn it is, but sometimes playing from the other side can be a learning experience as well.</p>
+            </details>
+        </section>
+
+        <!-- Footer -->
+        <footer class="footer">
+            <div class="version-info" id="versionInfo">Loading version...</div>
+            <a href="admin.html" class="admin-link" id="adminLink" style="display: none;">Admin Dashboard</a>
+        </footer>
     </div>
 
-    <script src="config.js?v=7"></script>
-    <script src="app.js?v=7"></script>
+    <script src="config.js?v=10"></script>
+    <script src="app.js?v=10"></script>
 </body>
 </html>

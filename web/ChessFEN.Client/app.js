@@ -51,20 +51,17 @@ function cacheElements() {
     elements.clearBtn = document.getElementById('clearBtn');
     elements.optionsPanel = document.getElementById('optionsPanel');
     elements.skipDetection = document.getElementById('skipDetection');
-    elements.modelSelect = document.getElementById('modelSelect');
     elements.analyzeBtn = document.getElementById('analyzeBtn');
-    elements.deepAnalyzeBtn = document.getElementById('deepAnalyzeBtn');
-    
+
     elements.inputSection = document.getElementById('inputSection');
     elements.loadingSection = document.getElementById('loadingSection');
     elements.resultsSection = document.getElementById('resultsSection');
     elements.errorSection = document.getElementById('errorSection');
     elements.errorMessage = document.getElementById('errorMessage');
-    
+
     elements.chessBoard = document.getElementById('chessBoard');
-    elements.fenInput = document.getElementById('fenInput');
     elements.fenStatus = document.getElementById('fenStatus');
-    elements.copyFenBtn = document.getElementById('copyFenBtn');
+    elements.fenHint = document.getElementById('fenHint');
     elements.analyzeWhiteBtn = document.getElementById('analyzeWhiteBtn');
     elements.analyzeBlackBtn = document.getElementById('analyzeBlackBtn');
     elements.playWhiteBtn = document.getElementById('playWhiteBtn');
@@ -97,13 +94,6 @@ function cacheElements() {
     elements.noGamesFound = document.getElementById('noGamesFound');
     elements.whiteGameIcon = document.getElementById('whiteGameIcon');
     elements.blackGameIcon = document.getElementById('blackGameIcon');
-    
-    // Deep analysis elements
-    elements.deepAnalysisResults = document.getElementById('deepAnalysisResults');
-    elements.consensusStatus = document.getElementById('consensusStatus');
-    elements.gamesStatus = document.getElementById('gamesStatus');
-    elements.modelResultsList = document.getElementById('modelResultsList');
-    elements.disagreementsList = document.getElementById('disagreementsList');
 }
 
 function bindEvents() {
@@ -119,8 +109,6 @@ function bindEvents() {
     // Actions
     elements.clearBtn.addEventListener('click', clearImage);
     elements.analyzeBtn.addEventListener('click', analyzeBoard);
-    elements.deepAnalyzeBtn.addEventListener('click', deepAnalyzeBoard);
-    elements.copyFenBtn.addEventListener('click', copyFen);
     elements.newScanBtn.addEventListener('click', resetToInput);
     elements.retryBtn.addEventListener('click', resetToInput);
     
@@ -156,18 +144,17 @@ function handleFileSelect(event) {
 function setImage(base64) {
     state.imageBase64 = base64;
     elements.previewImage.src = `data:image/jpeg;base64,${base64}`;
+    elements.previewImage.style.display = 'block';
     elements.previewContainer.hidden = false;
-    elements.optionsPanel.hidden = false;
+    elements.previewContainer.classList.add('preview-container');
     elements.analyzeBtn.disabled = false;
-    elements.deepAnalyzeBtn.disabled = false;
 }
 
 function clearImage() {
     state.imageBase64 = null;
     elements.previewContainer.hidden = true;
-    elements.optionsPanel.hidden = true;
+    elements.previewImage.style.display = 'none';
     elements.analyzeBtn.disabled = true;
-    elements.deepAnalyzeBtn.disabled = true;
     elements.fileInput.value = '';
 }
 
@@ -351,16 +338,17 @@ async function loadModels() {
 
 async function analyzeBoard() {
     if (!state.imageBase64) return;
-    
+
+    // Hide the image preview when analysis starts
+    elements.previewContainer.hidden = true;
+
     showSection('loading');
-    
+
     try {
         const skipDetection = elements.skipDetection.checked;
-        const model = elements.modelSelect.value;
-        
+
         const queryParams = ['debug=true'];  // Always request debug to get warped image
         if (skipDetection) queryParams.push('skip_detection=true');
-        if (model) queryParams.push(`model=${model}`);
         const query = '?' + queryParams.join('&');
         
         const url = `${CONFIG.API_BASE}/predict${query}`;
@@ -565,27 +553,6 @@ function displayDeepAnalysisResults(result) {
 // ============================================
 
 async function displayResults() {
-    // Hide deep analysis results (will be shown by displayDeepAnalysisResults if needed)
-    elements.deepAnalysisResults.hidden = true;
-    
-    // Show captured board image (warped image if available, otherwise original)
-    const capturedBoardContainer = document.getElementById('capturedBoardContainer');
-    const capturedBoardImage = document.getElementById('capturedBoardImage');
-    const predictedBoardTitle = document.getElementById('predictedBoardTitle');
-    
-    if (state.warpedImageBase64) {
-        capturedBoardImage.src = 'data:image/png;base64,' + state.warpedImageBase64;
-        capturedBoardContainer.hidden = false;
-        predictedBoardTitle.hidden = false;
-    } else if (state.imageBase64) {
-        capturedBoardImage.src = 'data:image/jpeg;base64,' + state.imageBase64;
-        capturedBoardContainer.hidden = false;
-        predictedBoardTitle.hidden = false;
-    } else {
-        capturedBoardContainer.hidden = true;
-        predictedBoardTitle.hidden = true;
-    }
-    
     // Validate questionable pieces using Chess.com before displaying
     if (state.questionableSquares && state.questionableSquares.length > 0) {
         console.log('displayResults: Validating questionable pieces via Chess.com...');
@@ -597,20 +564,19 @@ async function displayResults() {
     
     // Render board
     renderBoard();
-    
-    // Show FEN
-    elements.fenInput.value = state.resultFen;
-    
+
     // Validate FEN
     const validation = validateFen(state.resultFen);
     if (validation.isValid) {
-        elements.fenStatus.textContent = '✓ Valid FEN';
+        elements.fenStatus.textContent = '✓ Valid position';
         elements.fenStatus.className = 'fen-status valid';
+        elements.fenHint.hidden = true;
     } else {
-        elements.fenStatus.textContent = `⚠ ${validation.issues[0] || 'Invalid FEN'}`;
+        elements.fenStatus.textContent = `⚠ ${validation.issues[0] || 'Invalid position'}`;
         elements.fenStatus.className = 'fen-status invalid';
+        elements.fenHint.hidden = false;
     }
-    
+
     // Set Chess.com links
     const castling = inferCastlingRights();
     const whiteFen = `${state.resultFen} w ${castling} - 0 1`;
@@ -856,10 +822,15 @@ function resetToInput() {
     state.originalBoard = null;
     state.corrections = {};
     state.editMode = false;
-    
+
     elements.editBoardBtn.textContent = '✏️ Edit';
     elements.piecePalette.hidden = true;
-    
+
+    // Show the preview again if an image is still loaded
+    if (state.imageBase64) {
+        elements.previewContainer.hidden = false;
+    }
+
     showSection('input');
 }
 
@@ -950,20 +921,19 @@ function handleSquareClick(row, col) {
     
     // Recalculate FEN
     state.resultFen = boardToFen(state.board);
-    
-    // Update UI (but don't call full displayResults to avoid re-rendering everything)
-    elements.fenInput.value = state.resultFen;
-    
+
     // Validate FEN
     const validation = validateFen(state.resultFen);
     if (validation.isValid) {
-        elements.fenStatus.textContent = '✓ Valid FEN';
+        elements.fenStatus.textContent = '✓ Valid position';
         elements.fenStatus.className = 'fen-status valid';
+        elements.fenHint.hidden = true;
     } else {
-        elements.fenStatus.textContent = `⚠ ${validation.issues[0] || 'Invalid FEN'}`;
+        elements.fenStatus.textContent = `⚠ ${validation.issues[0] || 'Invalid position'}`;
         elements.fenStatus.className = 'fen-status invalid';
+        elements.fenHint.hidden = false;
     }
-    
+
     // Update Chess.com links
     const castling = inferCastlingRights();
     const whiteFen = `${state.resultFen} w ${castling} - 0 1`;

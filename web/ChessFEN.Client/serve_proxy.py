@@ -15,7 +15,8 @@ import threading
 PORT = 5006
 DIRECTORY = os.path.dirname(os.path.abspath(__file__))
 CERT_DIR = Path(DIRECTORY) / "certs"
-API_BACKEND = "http://localhost:5001"  # Always HTTP to local API
+PYTHON_BACKEND = "http://localhost:5000"  # Python Flask inference service
+DOTNET_BACKEND = "http://localhost:5001"  # .NET API for admin, chess-com-search
 
 
 # Use ThreadingMixIn to handle multiple concurrent requests
@@ -53,10 +54,18 @@ class ProxyHandler(http.server.SimpleHTTPRequestHandler):
     
     def proxy_request(self, method):
         """Proxy request to backend API"""
-        url = f"{API_BACKEND}{self.path}"
-        
+        # Route to correct backend based on path (matching nginx.conf logic)
+        if self.path.startswith('/api/chess/admin/') or self.path.startswith('/api/chess/chess-com-search'):
+            backend = DOTNET_BACKEND
+        elif self.path.startswith('/api/chess/'):
+            backend = PYTHON_BACKEND
+        else:
+            backend = DOTNET_BACKEND  # Default to .NET for other /api/ routes
+
+        url = f"{backend}{self.path}"
+
         print(f"[PROXY] {method} {self.path} -> {url}")
-        
+
         try:
             # Read request body for POST
             body = None
@@ -64,7 +73,7 @@ class ProxyHandler(http.server.SimpleHTTPRequestHandler):
                 content_length = int(self.headers.get('Content-Length', 0))
                 body = self.rfile.read(content_length)
                 print(f"[PROXY] Request body length: {len(body)} bytes")
-            
+
             # Create request
             req = urllib.request.Request(url, data=body, method=method)
             req.add_header('Content-Type', 'application/json')
@@ -172,7 +181,8 @@ if __name__ == '__main__':
         print(f"Chess FEN Scanner Client (HTTPS + Proxy)")
         print(f"=========================================")
         print(f"Serving at: https://localhost:{port}")
-        print(f"API proxy:  /api/* -> {API_BACKEND}")
+        print(f"API proxy:  /api/chess/* -> {PYTHON_BACKEND}")
+        print(f"            /api/chess/admin/*, chess-com-search -> {DOTNET_BACKEND}")
         print()
         print("⚠️  Accept the certificate warning in your browser")
         print()

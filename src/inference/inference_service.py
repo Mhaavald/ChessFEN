@@ -1996,7 +1996,7 @@ def list_models():
 @app.route('/api/chess/models/select', methods=['POST'])
 def select_model():
     """Select a model to use for inference."""
-    data = request.json
+    data = request.get_json(force=True, silent=True) or {}
     model_name = data.get('model_name')
     
     try:
@@ -2038,6 +2038,7 @@ def predict():
     
     # Get image
     img_bgr = None
+    json_data = request.get_json(force=True, silent=True)  # force=True ignores content-type, silent=True won't raise on error
     if 'image' in request.files:
         print("[PREDICT] Image from files")
         file = request.files['image']
@@ -2045,9 +2046,9 @@ def predict():
         print(f"[PREDICT] File bytes: {len(img_bytes)}")
         nparr = np.frombuffer(img_bytes, np.uint8)
         img_bgr = cv2.imdecode(nparr, cv2.IMREAD_COLOR)
-    elif request.json and 'image' in request.json:
+    elif json_data and 'image' in json_data:
         print("[PREDICT] Image from JSON body")
-        img_base64 = request.json['image']
+        img_base64 = json_data['image']
         print(f"[PREDICT] Base64 length: {len(img_base64)}, first 50 chars: {img_base64[:50]}")
         
         # Handle data URL format (e.g., "data:image/jpeg;base64,...")
@@ -2129,13 +2130,14 @@ def predict_multi():
         - disagreements: list of squares where models disagree
     """
     skip_detection = request.args.get('skip_detection', 'false').lower() == 'true'
-    
+
     print(f"[PREDICT_MULTI] Received request, skip_detection={skip_detection}")
-    
+
     # Get image from request
     img_bgr = None
-    if request.json and 'image' in request.json:
-        img_base64 = request.json['image']
+    json_data = request.get_json(force=True, silent=True)
+    if json_data and 'image' in json_data:
+        img_base64 = json_data['image']
         if ',' in img_base64 and img_base64.startswith('data:'):
             img_base64 = img_base64.split(',', 1)[1]
         try:
@@ -2232,7 +2234,7 @@ def submit_feedback():
         - user_id: string (from Azure AD)
         - user_email: string (from Azure AD)
     """
-    data = request.json
+    data = request.get_json(force=True, silent=True)
     if not data:
         return jsonify({"error": "No JSON data received"}), 400
 
@@ -2365,16 +2367,18 @@ def align_grid():
         - overlay: base64 image with warped board, grid, and piece detection
     """
     print("[ALIGN] Received grid alignment request")
-    
+
+    json_data = request.get_json(force=True, silent=True)
+
     # Check skip_detection flag
     skip_detection = False
-    if request.json and 'skip_detection' in request.json:
-        skip_detection = request.json.get('skip_detection', False)
-    
+    if json_data and 'skip_detection' in json_data:
+        skip_detection = json_data.get('skip_detection', False)
+
     # Get image
     img_bgr = None
-    if request.json and 'image' in request.json:
-        img_base64 = request.json['image']
+    if json_data and 'image' in json_data:
+        img_base64 = json_data['image']
         
         # Handle data URL format
         if ',' in img_base64 and img_base64.startswith('data:'):
