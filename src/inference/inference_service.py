@@ -1678,9 +1678,44 @@ def detect_board_with_validation(img_bgr, model, debug=False, max_time=8.0):
         debug_info["num_candidates"] = len(scored_candidates)
         debug_info["tried_candidates"] = []
 
-    # Fast-fail: If we found no candidates at all, skip the expensive fallback
-    # unless we have plenty of time
+    # Fast-fail: If we found no candidates at all, check for board-only image
+    # A board-only image is roughly square and has no clear boundary
     if len(scored_candidates) == 0:
+        h, w = img_bgr.shape[:2]
+        aspect_ratio = max(h, w) / (min(h, w) + 1e-6)
+        
+        # If image is roughly square (aspect < 1.15), it might be a board-only image
+        # In that case, try treating the whole image as the board
+        if aspect_ratio < 1.15:
+            print(f"[DETECTION] No edges found but image is square ({w}x{h}) - trying as board-only...")
+            # Treat entire image as the board
+            warped = cv2.resize(img_bgr, (WARP_SIZE, WARP_SIZE), interpolation=cv2.INTER_AREA)
+            warped_processed = preprocess_image(warped)
+            tile_size = TILE_SIZE
+            
+            board, confidences, avg_confidence, low_conf_count = predict_tiles_with_confidence(
+                warped_processed, model, tile_size
+            )
+            
+            is_valid, reason = validate_board_detection(board, confidences, avg_confidence, low_conf_count)
+            
+            if is_valid:
+                print(f"[DETECTION] Board-only detection SUCCESS! avg_conf={avg_confidence:.2f}")
+                # Create a quad that covers the full image
+                full_quad = np.array([
+                    [0, 0],
+                    [w, 0],
+                    [w, h],
+                    [0, h],
+                ], dtype=np.float32).reshape(-1, 1, 2)
+                
+                if debug:
+                    debug_info["board_only"] = True
+                    debug_info["avg_confidence"] = avg_confidence
+                return warped_processed, full_quad, board, confidences, avg_confidence, debug_info
+            else:
+                print(f"[DETECTION] Board-only detection failed: {reason}")
+        
         elapsed = time.time() - start_time
         if elapsed > 1.0 or max_time < 4.0:
             print(f"[DETECTION] No edge candidates found and limited time - failing fast")
