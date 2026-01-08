@@ -46,15 +46,12 @@ document.addEventListener('DOMContentLoaded', () => {
 function cacheElements() {
     elements.fileInput = document.getElementById('fileInput');
     elements.cameraBtn = document.getElementById('cameraBtn');
-    elements.previewContainer = document.getElementById('previewContainer');
-    elements.previewImage = document.getElementById('previewImage');
-    elements.clearBtn = document.getElementById('clearBtn');
     elements.optionsPanel = document.getElementById('optionsPanel');
     elements.skipDetection = document.getElementById('skipDetection');
-    elements.analyzeBtn = document.getElementById('analyzeBtn');
 
     elements.inputSection = document.getElementById('inputSection');
     elements.loadingSection = document.getElementById('loadingSection');
+    elements.loadingPreviewImage = document.getElementById('loadingPreviewImage');
     elements.resultsSection = document.getElementById('resultsSection');
     elements.errorSection = document.getElementById('errorSection');
     elements.errorMessage = document.getElementById('errorMessage');
@@ -80,14 +77,13 @@ function cacheElements() {
     
     // Board editing elements
     elements.editBoardBtn = document.getElementById('editBoardBtn');
-    elements.resetBoardBtn = document.getElementById('resetBoardBtn');
-    elements.showCapturedBtn = document.getElementById('showCapturedBtn');
-    elements.capturedBoardToggle = document.getElementById('capturedBoardToggle');
+    elements.boardActions = document.getElementById('boardActions');
+    elements.capturedBoardReference = document.getElementById('capturedBoardReference');
     elements.capturedBoardImage = document.getElementById('capturedBoardImage');
+    elements.editModeControls = document.getElementById('editModeControls');
     elements.piecePalette = document.getElementById('piecePalette');
-    elements.correctionNotice = document.getElementById('correctionNotice');
-    elements.correctionCount = document.getElementById('correctionCount');
-    elements.submitCorrectionsBtn = document.getElementById('submitCorrectionsBtn');
+    elements.resetBoardBtn = document.getElementById('resetBoardBtn');
+    elements.doneEditingBtn = document.getElementById('doneEditingBtn');
     
     // Game check elements
     elements.findGamesSection = document.getElementById('findGamesSection');
@@ -102,24 +98,21 @@ function cacheElements() {
 function bindEvents() {
     // File input
     elements.fileInput.addEventListener('change', handleFileSelect);
-    
+
     // Camera
     elements.cameraBtn.addEventListener('click', openCamera);
     elements.closeCameraBtn.addEventListener('click', closeCamera);
     elements.switchCameraBtn.addEventListener('click', switchCamera);
     elements.captureBtn.addEventListener('click', captureFrame);
-    
+
     // Actions
-    elements.clearBtn.addEventListener('click', clearImage);
-    elements.analyzeBtn.addEventListener('click', analyzeBoard);
     elements.newScanBtn.addEventListener('click', resetToInput);
     elements.retryBtn.addEventListener('click', resetToInput);
     
     // Board editing
-    elements.editBoardBtn.addEventListener('click', toggleEditMode);
+    elements.editBoardBtn.addEventListener('click', enterEditMode);
+    elements.doneEditingBtn.addEventListener('click', exitEditMode);
     elements.resetBoardBtn.addEventListener('click', resetBoard);
-    elements.submitCorrectionsBtn.addEventListener('click', submitCorrections);
-    elements.showCapturedBtn.addEventListener('click', toggleCapturedBoard);
     
     // Check for games
     // Game check is now automatic - no button event needed
@@ -147,19 +140,8 @@ function handleFileSelect(event) {
 
 function setImage(base64) {
     state.imageBase64 = base64;
-    elements.previewImage.src = `data:image/jpeg;base64,${base64}`;
-    elements.previewImage.style.display = 'block';
-    elements.previewContainer.hidden = false;
-    elements.previewContainer.classList.add('preview-container');
-    elements.analyzeBtn.disabled = false;
-}
-
-function clearImage() {
-    state.imageBase64 = null;
-    elements.previewContainer.hidden = true;
-    elements.previewImage.style.display = 'none';
-    elements.analyzeBtn.disabled = true;
-    elements.fileInput.value = '';
+    // Auto-analyze immediately after setting image
+    analyzeBoard();
 }
 
 // ============================================
@@ -343,8 +325,8 @@ async function loadModels() {
 async function analyzeBoard() {
     if (!state.imageBase64) return;
 
-    // Hide the image preview when analysis starts
-    elements.previewContainer.hidden = true;
+    // Show the image in the loading section
+    elements.loadingPreviewImage.src = `data:image/jpeg;base64,${state.imageBase64}`;
 
     showSection('loading');
 
@@ -406,10 +388,16 @@ async function analyzeBoard() {
             
             await displayResults();
         } else {
-            // Show the actual response for debugging
-            throw new Error(error || 'Board detection failed. Try "skip detection" if image is already cropped. Response: ' + JSON.stringify(result).substring(0, 100));
+            // Show user-friendly error message
+            let errorMsg = error || 'Board not detected';
+            if (errorMsg.toLowerCase().includes('timeout') || errorMsg.toLowerCase().includes('no board')) {
+                errorMsg = 'Could not detect chess board. Try capturing a clearer image with better lighting and focus.';
+            } else if (!error) {
+                errorMsg = 'Board not detected. Try "skip detection" if your image is already cropped to just the board.';
+            }
+            throw new Error(errorMsg);
         }
-        
+
     } catch (error) {
         console.error('Analyze error:', error);
         // Show detailed error including if it's CORS
@@ -597,14 +585,10 @@ async function displayResults() {
     // Auto-check for games
     checkForGames();
 
-    // Update edit UI
-    updateEditUI();
-
-    // Show/hide Compare button based on whether we have an image to compare
-    const hasImage = state.warpedImageBase64 || state.imageBase64;
-    elements.showCapturedBtn.hidden = !hasImage;
-    elements.capturedBoardToggle.hidden = true;
-    elements.showCapturedBtn.textContent = '📷 Compare';
+    // Ensure edit mode is hidden initially
+    elements.capturedBoardReference.hidden = true;
+    elements.editModeControls.hidden = true;
+    elements.boardActions.hidden = false;
 
     showSection('results');
 }
@@ -826,6 +810,7 @@ function showError(message) {
 }
 
 function resetToInput() {
+    state.imageBase64 = null;
     state.resultFen = null;
     state.originalFen = null;
     state.board = null;
@@ -833,15 +818,10 @@ function resetToInput() {
     state.corrections = {};
     state.editMode = false;
 
-    elements.editBoardBtn.textContent = '✏️ Edit';
-    elements.piecePalette.hidden = true;
-    elements.capturedBoardToggle.hidden = true;
-    elements.showCapturedBtn.textContent = '📷 Compare';
-
-    // Show the preview again if an image is still loaded
-    if (state.imageBase64) {
-        elements.previewContainer.hidden = false;
-    }
+    elements.capturedBoardReference.hidden = true;
+    elements.editModeControls.hidden = true;
+    elements.boardActions.hidden = false;
+    elements.fileInput.value = '';
 
     showSection('input');
 }
@@ -871,24 +851,41 @@ function showToast(message) {
 // Board Editing
 // ============================================
 
-function toggleEditMode() {
-    state.editMode = !state.editMode;
+function enterEditMode() {
+    state.editMode = true;
     state.selectedPiece = 'empty';
-    
-    elements.editBoardBtn.textContent = state.editMode ? '✓ Done' : '✏️ Edit';
-    elements.piecePalette.hidden = !state.editMode;
-    
-    // Update palette selection
+
+    // Show reference image above the board
+    const imageToShow = state.warpedImageBase64 || state.imageBase64;
+    if (imageToShow) {
+        elements.capturedBoardImage.src = `data:image/jpeg;base64,${imageToShow}`;
+    }
+    elements.capturedBoardReference.hidden = false;
+
+    // Show edit controls below the board, hide the edit button
+    elements.editModeControls.hidden = false;
+    elements.boardActions.hidden = true;
+
+    // Update palette selection and render board in edit mode
     updatePaletteSelection();
     renderBoard();
 }
 
-function updateEditUI() {
-    const hasCorrections = Object.keys(state.corrections).length > 0;
-    
-    elements.correctionNotice.hidden = !hasCorrections;
-    elements.correctionCount.textContent = Object.keys(state.corrections).length;
-    elements.resetBoardBtn.hidden = !hasCorrections;
+function exitEditMode() {
+    state.editMode = false;
+
+    // Hide reference image and edit controls
+    elements.capturedBoardReference.hidden = true;
+    elements.editModeControls.hidden = true;
+    elements.boardActions.hidden = false;
+
+    // Re-render board in normal mode
+    renderBoard();
+
+    // Submit corrections silently if any were made
+    if (Object.keys(state.corrections).length > 0) {
+        submitCorrections();
+    }
 }
 
 function handlePaletteClick(e) {
@@ -957,10 +954,7 @@ function handleSquareClick(row, col) {
     
     // Re-render board only
     renderBoard();
-    
-    // Update edit UI
-    updateEditUI();
-    
+
     // Reset game search results (user can click Search button)
     if (elements.gamesCheckStatus) elements.gamesCheckStatus.hidden = true;
     if (elements.gamesFoundIcons) elements.gamesFoundIcons.hidden = true;
@@ -971,12 +965,31 @@ async function resetBoard() {
     state.board = JSON.parse(JSON.stringify(state.originalBoard));
     state.resultFen = state.originalFen;
     state.corrections = {};
-    state.editMode = false;
-    
-    elements.editBoardBtn.textContent = '✏️ Edit';
-    elements.piecePalette.hidden = true;
-    
-    await displayResults();
+
+    // Stay in edit mode but show reset board
+    renderBoard();
+
+    // Update validation status
+    const validation = validateFen(state.resultFen);
+    if (validation.isValid) {
+        elements.fenStatus.textContent = '✓ Valid position';
+        elements.fenStatus.className = 'fen-status valid';
+        elements.fenHint.hidden = true;
+    } else {
+        elements.fenStatus.textContent = `⚠ ${validation.issues[0] || 'Invalid position'}`;
+        elements.fenStatus.className = 'fen-status invalid';
+        elements.fenHint.hidden = false;
+    }
+
+    // Update Chess.com links
+    const castling = inferCastlingRights();
+    const whiteFen = `${state.resultFen} w ${castling} - 0 1`;
+    const blackFen = `${state.resultFen} b ${castling} - 0 1`;
+    elements.analyzeWhiteBtn.href = `${CONFIG.CHESS_COM_ANALYSIS_URL}?fen=${encodeURIComponent(whiteFen)}&flip=false&tab=analysis`;
+    elements.analyzeBlackBtn.href = `${CONFIG.CHESS_COM_ANALYSIS_URL}?fen=${encodeURIComponent(blackFen)}&flip=true&tab=analysis`;
+    elements.playWhiteBtn.href = `${CONFIG.CHESS_COM_PLAY_URL}?fen=${encodeURIComponent(whiteFen)}&flip=false&tab=play`;
+    elements.playBlackBtn.href = `${CONFIG.CHESS_COM_PLAY_URL}?fen=${encodeURIComponent(blackFen)}&flip=true&tab=play`;
+
     showToast('Board reset to original');
 }
 
@@ -1016,94 +1029,54 @@ function pieceToFenChar(piece) {
     return map[piece] || '';
 }
 
-function toggleCapturedBoard() {
-    const isVisible = !elements.capturedBoardToggle.hidden;
-
-    if (isVisible) {
-        // Hide it
-        elements.capturedBoardToggle.hidden = true;
-        elements.showCapturedBtn.textContent = '📷 Compare';
-    } else {
-        // Show it - use warped image if available, otherwise original
-        const imageToShow = state.warpedImageBase64 || state.imageBase64;
-        if (imageToShow) {
-            elements.capturedBoardImage.src = `data:image/jpeg;base64,${imageToShow}`;
-            elements.capturedBoardToggle.hidden = false;
-            elements.showCapturedBtn.textContent = '📷 Hide';
-        }
-    }
-}
-
 async function submitCorrections() {
     if (Object.keys(state.corrections).length === 0) {
-        alert('No corrections to submit');
-        return;
+        return; // No corrections to submit
     }
-    
+
     // Validate state
-    if (!state.originalFen) {
-        alert('No original FEN available. Please analyze an image first.');
+    if (!state.originalFen || !state.resultFen) {
+        console.warn('Cannot submit corrections: missing FEN data');
         return;
     }
-    if (!state.resultFen) {
-        alert('No corrected FEN available.');
-        return;
-    }
-    
+
     try {
         // Transform corrections to simple {square: piece} format for API
-        // state.corrections is { "row,col": { square: "a1", from: "empty", to: "wR" } }
-        // API expects { "a1": "wR" }
         const correctedSquares = {};
         for (const [key, correction] of Object.entries(state.corrections)) {
             correctedSquares[correction.square] = correction.to;
         }
-        
-        // Use camelCase for .NET API (PropertyNameCaseInsensitive handles both)
+
         // Send the WARPED image (if available) so feedback tiles can be extracted correctly
         const imageToSend = state.warpedImageBase64 || state.imageBase64 || null;
         console.log('Sending feedback with', state.warpedImageBase64 ? 'warped image' : 'original image');
-        
+
         const payload = {
             originalFen: state.originalFen,
             correctedFen: state.resultFen,
             image: imageToSend,
             correctedSquares: correctedSquares
         };
-        
+
         console.log('Submitting corrections to:', `${CONFIG.API_BASE}/feedback`);
-        console.log('Payload:', JSON.stringify(payload, null, 2));
-        
+
         const response = await fetch(`${CONFIG.API_BASE}/feedback`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             credentials: 'include',
             body: JSON.stringify(payload)
         });
-        
-        const responseText = await response.text();
-        console.log('Feedback response:', response.status, responseText);
-        
+
         if (response.ok) {
-            showToast('Corrections submitted for training!');
+            showToast('Corrections saved');
             state.originalFen = state.resultFen;
             state.originalBoard = JSON.parse(JSON.stringify(state.board));
             state.corrections = {};
-            updateEditUI();
         } else {
-            let errorMsg = 'Failed to submit corrections';
-            try {
-                const errorData = JSON.parse(responseText);
-                errorMsg = errorData.error || errorData.title || errorData.message || errorMsg;
-            } catch (e) {}
-            showToast(errorMsg);
-            console.error('Submit corrections failed:', response.status, responseText);
-            alert('Submit failed: ' + response.status + ' - ' + responseText.substring(0, 200));
+            console.error('Submit corrections failed:', response.status);
         }
     } catch (error) {
         console.error('Submit corrections error:', error);
-        showToast('Error submitting corrections: ' + error.message);
-        alert('Submit error: ' + error.message);
     }
 }
 

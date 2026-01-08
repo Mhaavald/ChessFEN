@@ -1154,22 +1154,23 @@ def is_valid_chess_position(board, piece_count):
     return True, "valid"
 
 
-def find_board_from_high_confidence_pieces(img_bgr, model, debug=False):
+def find_board_from_high_confidence_pieces(img_bgr, model, debug=False, max_time=3.0):
     """
     Find board by locating high-confidence pieces and deriving board candidates.
-    
+
     Strategy:
     1. Scan image for pieces with very high confidence (>90%)
     2. For each high-confidence piece found, it constrains the board position
     3. Generate board candidates based on where the piece could be (any of 64 squares)
     4. But only try positions where piece is on valid square given its location
     5. Score each candidate by predicting full board and checking validity
-    
+
     Args:
-        img_bgr: Input image in BGR format  
+        img_bgr: Input image in BGR format
         model: PyTorch model for classification
         debug: Include debug info
-    
+        max_time: Maximum time in seconds before giving up
+
     Returns:
         quad: 4 corner points of detected board (or None if not found)
         debug_info: dict with search details if debug=True
@@ -1194,14 +1195,26 @@ def find_board_from_high_confidence_pieces(img_bgr, model, debug=False):
     tile_sizes = sorted(set(tile_sizes), reverse=True)
     
     for tile_size in tile_sizes:
+        # Early timeout check before starting expensive operations
+        if time.time() - start_time > max_time:
+            print(f"[HC DETECT] Timeout before tile_size={tile_size}")
+            break
+            
         print(f"[HC DETECT] Trying tile_size={tile_size}...")
         
         high_conf_pieces = []
         
         # Scan with 50% overlap for speed
         step = tile_size // 2
+        timed_out = False
         
         for y in range(0, h - tile_size, step):
+            # Check timeout every row
+            if time.time() - start_time > max_time:
+                print(f"  Timeout during scan at y={y}")
+                timed_out = True
+                break
+                
             for x in range(0, w - tile_size, step):
                 result = classify_tile_at(img_bgr, x, y, tile_size, model)
                 if result is None:
@@ -1223,6 +1236,10 @@ def find_board_from_high_confidence_pieces(img_bgr, model, debug=False):
                         })
                         if debug:
                             print(f"  Found {best[2]} ({best[3]*100:.0f}%) at ({best[0]},{best[1]})")
+        
+        # Break out of tile_size loop if timed out
+        if timed_out:
+            break
         
         if len(high_conf_pieces) < 2:
             print(f"  Only {len(high_conf_pieces)} high-confidence pieces, need at least 2")
@@ -1264,11 +1281,18 @@ def find_board_from_high_confidence_pieces(img_bgr, model, debug=False):
         
         print(f"  Generated {len(board_candidates)} board candidates")
         
-        # Score each candidate
+        # Score each candidate (with timeout check)
         best_candidate = None
         best_score = 0
+        candidates_checked = 0
         
         for grid_left, grid_top, anchor_row, anchor_col in board_candidates:
+            # Check timeout every 5 candidates
+            candidates_checked += 1
+            if candidates_checked % 5 == 0 and time.time() - start_time > max_time:
+                print(f"  Timeout after checking {candidates_checked} candidates")
+                break
+                
             result = predict_board_at_position(img_bgr, grid_left, grid_top, tile_size, model)
             if result is None:
                 continue
@@ -1319,10 +1343,10 @@ def find_board_from_high_confidence_pieces(img_bgr, model, debug=False):
             return quad, debug_info
         
         print(f"  No valid board found at this tile size")
-        
-        # Timeout
-        if time.time() - start_time > 10:
-            print(f"[HC DETECT] Timeout")
+
+        # Timeout check
+        if time.time() - start_time > max_time:
+            print(f"[HC DETECT] Timeout after {max_time:.1f}s")
             break
     
     elapsed = time.time() - start_time
@@ -1374,22 +1398,23 @@ def refine_tile_position(img_bgr, x, y, tile_size, model, piece_class):
     return best_x, best_y, best_prob
 
 
-def find_board_from_center(img_bgr, model, debug=False):
+def find_board_from_center(img_bgr, model, debug=False, max_time=2.0):
     """
     Board detection by starting from image center and finding pieces.
-    
+
     Strategy:
     1. Assume center of image is somewhere on the board
     2. Try different tile sizes, starting from center
     3. When we find a piece with moderate confidence, fine-tune position
     4. Once we have high confidence (>85%), we know the tile size is right
     5. Expand from that anchor to find the full 8x8 grid
-    
+
     Args:
         img_bgr: Input image in BGR format
         model: PyTorch model for classification
         debug: Include debug info
-    
+        max_time: Maximum time in seconds before giving up
+
     Returns:
         quad: 4 corner points of detected board (or None if not found)
         debug_info: dict with search details if debug=True
@@ -1449,6 +1474,11 @@ def find_board_from_center(img_bgr, model, debug=False):
             
             # Look for any piece (not empty) with at least 40% confidence
             if pred_class != 'empty' and prob > 0.4:
+                # Check timeout before expensive refinement
+                if time.time() - start_time > max_time:
+                    print(f"[PIECE DETECT] Timeout before refinement")
+                    break
+                
                 print(f"  Found candidate: {pred_class} ({prob*100:.0f}%) at ({x},{y})")
                 
                 # Fine-tune the position to maximize confidence
@@ -1461,6 +1491,14 @@ def find_board_from_center(img_bgr, model, debug=False):
                 
                 # If we got high confidence, we found the right tile size and alignment
                 if ref_prob > 0.75:
+                    # Check timeout before expensive grid expansion
+                    # Grid expansion can take 5-10s, so require at least 2s remaining
+                    elapsed_now = time.time() - start_time
+                    remaining = max_time - elapsed_now
+                    if remaining < 2.0:
+                        print(f"[PIECE DETECT] Not enough time for grid expansion ({remaining:.1f}s remaining)")
+                        break
+                        
                     print(f"  HIGH CONFIDENCE! Expanding grid from this anchor...")
                     
                     # Expand from this anchor
@@ -1507,12 +1545,12 @@ def find_board_from_center(img_bgr, model, debug=False):
                             return quad, debug_info
             
             # Timeout check
-            if time.time() - start_time > 15:
-                print(f"[PIECE DETECT] Timeout!")
+            if time.time() - start_time > max_time:
+                print(f"[PIECE DETECT] Timeout after {max_time:.1f}s!")
                 break
-        
+
         # Check if we should continue to next tile size
-        if time.time() - start_time > 15:
+        if time.time() - start_time > max_time:
             break
     
     elapsed = time.time() - start_time
@@ -1525,25 +1563,41 @@ def find_board_from_center(img_bgr, model, debug=False):
     return None, debug_info
 
 
-def find_board_from_kings(img_bgr, model, debug=False):
+def find_board_from_kings(img_bgr, model, debug=False, max_time=5.0):
     """
     Try multiple fallback methods to detect the board.
-    
+
     Methods tried in order:
     1. High-confidence piece detection - find pieces with >85% confidence,
        generate board candidates, validate with FEN
     2. Center-based expansion - start from center, find pieces, expand to grid
+
+    Args:
+        max_time: Maximum time in seconds for all fallback methods combined
     """
-    print("[FALLBACK] Trying high-confidence piece method...")
-    quad, debug_info = find_board_from_high_confidence_pieces(img_bgr, model, debug)
+    import time
+    start_time = time.time()
+
+    # Allocate time: 60% for high-confidence, 40% for center-based
+    hc_time = max_time * 0.6
+    center_time = max_time * 0.4
+
+    print(f"[FALLBACK] Trying high-confidence piece method (max {hc_time:.1f}s)...")
+    quad, debug_info = find_board_from_high_confidence_pieces(img_bgr, model, debug, max_time=hc_time)
     if quad is not None:
         return quad, debug_info
-    
-    print("[FALLBACK] Trying center-based expansion method...")
-    quad, debug_info = find_board_from_center(img_bgr, model, debug)
+
+    elapsed = time.time() - start_time
+    remaining = max_time - elapsed
+    if remaining < 1.0:
+        print(f"[FALLBACK] No time for center-based method ({elapsed:.1f}s elapsed)")
+        return None, debug_info if debug_info else {"method": "timeout"}
+
+    print(f"[FALLBACK] Trying center-based expansion method (max {remaining:.1f}s)...")
+    quad, debug_info = find_board_from_center(img_bgr, model, debug, max_time=remaining)
     if quad is not None:
         return quad, debug_info
-    
+
     print("[FALLBACK] All methods failed")
     return None, debug_info if debug_info else {"method": "all_failed"}
 
@@ -1566,16 +1620,17 @@ def get_piece_probability(warped, row, col, tile_size, model, piece_class):
         return probs[0, piece_idx].item()
 
 
-def detect_board_with_validation(img_bgr, model, debug=False):
+def detect_board_with_validation(img_bgr, model, debug=False, max_time=8.0):
     """
     Detect board using multiple candidates and validate with model predictions.
     Returns the best detection that passes validation.
-    
+
     Args:
         img_bgr: Input image in BGR format
         model: PyTorch model for classification
         debug: Include debug info
-    
+        max_time: Maximum time in seconds before giving up (default 8s)
+
     Returns:
         warped: Warped board image (or None if all candidates fail)
         board: 8x8 piece predictions
@@ -1583,10 +1638,13 @@ def detect_board_with_validation(img_bgr, model, debug=False):
         avg_confidence: average confidence
         debug_info: dict with detection details if debug=True
     """
+    import time
+    start_time = time.time()
+
     from detect_board import _candidate_quads_from_edges, combined_grid_score
-    
+
     debug_info = {} if debug else None
-    
+
     # Get all candidate quads
     candidates = _candidate_quads_from_edges(img_bgr)
     img_area = img_bgr.shape[0] * img_bgr.shape[1]
@@ -1615,18 +1673,31 @@ def detect_board_with_validation(img_bgr, model, debug=False):
     
     # Sort by grid score (highest first)
     scored_candidates.sort(key=lambda x: -x[0])
-    
+
     if debug:
         debug_info["num_candidates"] = len(scored_candidates)
         debug_info["tried_candidates"] = []
+
+    # Fast-fail: If we found no candidates at all, skip the expensive fallback
+    # unless we have plenty of time
+    if len(scored_candidates) == 0:
+        elapsed = time.time() - start_time
+        if elapsed > 1.0 or max_time < 4.0:
+            print(f"[DETECTION] No edge candidates found and limited time - failing fast")
+            if debug:
+                debug_info["fast_fail"] = True
+                debug_info["reason"] = "No board edges detected in image"
+            return None, None, None, None, None, debug_info
     
     # Try candidates in order of grid score, validate with model
     for i, (grid_score, quad, rel_area) in enumerate(scored_candidates[:5]):  # Try up to 5
         warped = warp_quad(img_bgr, quad, out_size=WARP_SIZE)
+        # Apply preprocessing to warped image for classification
+        warped_processed = preprocess_image(warped)
         tile_size = TILE_SIZE
         
         board, confidences, avg_confidence, low_conf_count = predict_tiles_with_confidence(
-            warped, model, tile_size
+            warped_processed, model, tile_size
         )
         
         is_valid, reason = validate_board_detection(board, confidences, avg_confidence, low_conf_count)
@@ -1645,35 +1716,48 @@ def detect_board_with_validation(img_bgr, model, debug=False):
         if is_valid:
             if debug:
                 debug_info["selected_index"] = i
-            return warped, quad, board, confidences, avg_confidence, debug_info
+            return warped_processed, quad, board, confidences, avg_confidence, debug_info
     
     # No valid candidate found, return best one anyway with warning
     if scored_candidates:
         best_grid_score, best_quad, _ = scored_candidates[0]
         warped = warp_quad(img_bgr, best_quad, out_size=WARP_SIZE)
+        warped_processed = preprocess_image(warped)
         tile_size = TILE_SIZE
         board, confidences, avg_confidence, low_conf_count = predict_tiles_with_confidence(
-            warped, model, tile_size
+            warped_processed, model, tile_size
         )
         if debug:
             debug_info["selected_index"] = 0
             debug_info["warning"] = "No candidate passed validation, using best grid score"
-        return warped, best_quad, board, confidences, avg_confidence, debug_info
+        return warped_processed, best_quad, board, confidences, avg_confidence, debug_info
     
     # FALLBACK: No edge-based candidates found - try king-based detection
-    print("[DETECTION] No edge candidates found, trying king-based fallback...")
-    king_quad, king_debug = find_board_from_kings(img_bgr, model, debug=debug)
-    
+    # But only if we have time remaining
+    elapsed = time.time() - start_time
+    remaining_time = max_time - elapsed
+
+    if remaining_time < 1.0:
+        print(f"[DETECTION] No candidates found and no time for fallback ({elapsed:.1f}s elapsed)")
+        if debug:
+            debug_info["timeout"] = True
+            debug_info["elapsed_seconds"] = elapsed
+        return None, None, None, None, None, debug_info
+
+    print(f"[DETECTION] No edge candidates found, trying king-based fallback ({remaining_time:.1f}s remaining)...")
+    king_quad, king_debug = find_board_from_kings(img_bgr, model, debug=debug, max_time=remaining_time)
+
     if king_quad is not None:
         warped = warp_quad(img_bgr, king_quad, out_size=WARP_SIZE)
+        warped_processed = preprocess_image(warped)
         tile_size = TILE_SIZE
         board, confidences, avg_confidence, low_conf_count = predict_tiles_with_confidence(
-            warped, model, tile_size
+            warped_processed, model, tile_size
         )
         if debug:
             debug_info["king_fallback"] = king_debug
             debug_info["warning"] = "Used king-based fallback detection"
-        return warped, king_quad, board, confidences, avg_confidence, debug_info
+        return warped_processed, king_quad, board, confidences, avg_confidence, debug_info
     
     return None, None, None, None, None, debug_info
 
@@ -1738,17 +1822,20 @@ def predict_board(img_bgr, model, debug=False, skip_detection=False):
     if debug:
         result["debug_images"] = {}
     
-    # Apply consistent preprocessing to all images
-    img_bgr = preprocess_image(img_bgr)
+    # NOTE: Preprocessing is now applied AFTER board detection
+    # The grayscale conversion and contrast changes can interfere with edge detection
+    # We detect the board on the original image, then preprocess the warped result
     
     if skip_detection:
         # Treat entire image as the board - just resize to WARP_SIZE
-        warped = cv2.resize(img_bgr, (WARP_SIZE, WARP_SIZE), interpolation=cv2.INTER_AREA)
+        # Apply preprocessing first since we're not doing edge detection
+        img_preprocessed = preprocess_image(img_bgr)
+        warped = cv2.resize(img_preprocessed, (WARP_SIZE, WARP_SIZE), interpolation=cv2.INTER_AREA)
         tile_size = TILE_SIZE
         
         if debug:
             # No detection overlay when skipping detection
-            result["debug_images"]["detection"] = cv2.cvtColor(img_bgr, cv2.COLOR_BGR2RGB)
+            result["debug_images"]["detection"] = cv2.cvtColor(img_preprocessed, cv2.COLOR_BGR2RGB)
             result["debug_images"]["warped"] = cv2.cvtColor(warped, cv2.COLOR_BGR2RGB)
         
         # Classify tiles
@@ -1757,6 +1844,7 @@ def predict_board(img_bgr, model, debug=False, skip_detection=False):
         )
     else:
         # Use validated detection (tries multiple candidates)
+        # Detection uses ORIGINAL image to preserve edges
         warped, quad, board, confidences, avg_confidence, detection_debug = detect_board_with_validation(
             img_bgr, model, debug=debug
         )
@@ -1768,7 +1856,7 @@ def predict_board(img_bgr, model, debug=False, skip_detection=False):
         tile_size = TILE_SIZE
         
         if debug:
-            # Board detection overlay
+            # Board detection overlay (on original image)
             overlay = img_bgr.copy()
             pts = quad.reshape((-1, 1, 2)).astype(np.int32)
             cv2.polylines(overlay, [pts], True, (0, 255, 0), 3)

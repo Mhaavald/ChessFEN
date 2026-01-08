@@ -5,7 +5,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
     <title>Chess FEN Scanner</title>
     <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>♔</text></svg>">
-    <link rel="stylesheet" href="styles.css?v=11">
+    <link rel="stylesheet" href="styles.css?v=18">
 </head>
 <body>
     <div class="app">
@@ -22,33 +22,30 @@
                         📁 File
                         <input type="file" id="fileInput" accept="image/*" hidden>
                     </label>
-                    <button class="btn btn-success" id="analyzeBtn" disabled>
-                        🔍 Analyze
-                    </button>
                 </div>
                 <!-- Skip Detection Option -->
-                <div class="skip-detection-row" id="optionsPanel" hidden>
+                <div class="skip-detection-row" id="optionsPanel">
                     <label class="checkbox-label">
                         <input type="checkbox" id="skipDetection">
                         <span>Skip board detection</span>
                     </label>
                 </div>
-                <!-- Hidden elements for state management -->
-                <div id="previewContainer" hidden>
-                    <img id="previewImage" alt="Board preview" style="display:none">
-                    <button class="btn btn-icon btn-clear" id="clearBtn" title="Clear">✕</button>
-                </div>
             </section>
 
             <!-- Loading State -->
             <section class="card loading-card" id="loadingSection" hidden>
-                <div class="spinner"></div>
-                <p id="loadingStatus">Analyzing board...</p>
-                <div class="progress-stages" id="progressStages">
-                    <span class="stage active" data-stage="detect">🔍 Detecting</span>
-                    <span class="stage" data-stage="warp">📐 Warping</span>
-                    <span class="stage" data-stage="classify">♟️ Classifying</span>
-                    <span class="stage" data-stage="validate">✓ Validating</span>
+                <div class="loading-preview">
+                    <img id="loadingPreviewImage" class="loading-preview-image" alt="Analyzing...">
+                </div>
+                <div class="loading-info">
+                    <div class="spinner"></div>
+                    <p id="loadingStatus">Analyzing board...</p>
+                    <div class="progress-stages" id="progressStages">
+                        <span class="stage active" data-stage="detect">🔍 Detecting</span>
+                        <span class="stage" data-stage="warp">📐 Warping</span>
+                        <span class="stage" data-stage="classify">♟️ Classifying</span>
+                        <span class="stage" data-stage="validate">✓ Validating</span>
+                    </div>
                 </div>
             </section>
 
@@ -60,52 +57,53 @@
                     <p class="fen-hint" id="fenHint" hidden>Inspect the board and edit if needed</p>
                 </div>
 
+                <!-- Reference Image (shown in edit mode, above the board) -->
+                <div class="captured-board-reference" id="capturedBoardReference" hidden>
+                    <h4>Reference Image</h4>
+                    <img id="capturedBoardImage" class="captured-board-image" alt="Captured board">
+                </div>
+
                 <!-- Board Display -->
                 <div class="predicted-board-container">
                     <div class="board-wrapper">
                         <table class="chess-board" id="chessBoard"></table>
                     </div>
-                    <div class="board-actions">
-                        <button class="btn btn-sm btn-outline" id="editBoardBtn" title="Edit position">✏️ Edit</button>
-                        <button class="btn btn-sm btn-outline" id="resetBoardBtn" title="Reset to original" hidden>↩️ Reset</button>
-                        <button class="btn btn-sm btn-outline" id="showCapturedBtn" title="Show captured board" hidden>📷 Compare</button>
+                    <div class="board-actions" id="boardActions">
+                        <button class="btn btn-sm btn-outline" id="editBoardBtn" title="Edit position">✏️ Edit position</button>
                     </div>
                 </div>
 
-                <!-- Captured Board (toggle) -->
-                <div class="captured-board-toggle" id="capturedBoardToggle" hidden>
-                    <h4>Captured Board</h4>
-                    <img id="capturedBoardImage" class="captured-board-image" alt="Captured board">
-                </div>
+                <!-- Edit Mode Controls (below the board) -->
+                <div class="edit-mode-controls" id="editModeControls" hidden>
+                    <!-- Piece Palette -->
+                    <div class="piece-palette" id="piecePalette">
+                        <div class="palette-row">
+                            <span class="palette-piece" data-piece="wK">♔</span>
+                            <span class="palette-piece" data-piece="wQ">♕</span>
+                            <span class="palette-piece" data-piece="wR">♖</span>
+                            <span class="palette-piece" data-piece="wB">♗</span>
+                            <span class="palette-piece" data-piece="wN">♘</span>
+                            <span class="palette-piece" data-piece="wP">♙</span>
+                        </div>
+                        <div class="palette-row">
+                            <span class="palette-piece" data-piece="bK">♚</span>
+                            <span class="palette-piece" data-piece="bQ">♛</span>
+                            <span class="palette-piece" data-piece="bR">♜</span>
+                            <span class="palette-piece" data-piece="bB">♝</span>
+                            <span class="palette-piece" data-piece="bN">♞</span>
+                            <span class="palette-piece" data-piece="bP">♟</span>
+                        </div>
+                        <div class="palette-row">
+                            <span class="palette-piece selected" data-piece="empty">⬜</span>
+                            <span class="palette-hint">Click piece, then click square</span>
+                        </div>
+                    </div>
 
-                <!-- Piece Palette (for editing) -->
-                <div class="piece-palette" id="piecePalette" hidden>
-                    <div class="palette-row">
-                        <span class="palette-piece" data-piece="wK">♔</span>
-                        <span class="palette-piece" data-piece="wQ">♕</span>
-                        <span class="palette-piece" data-piece="wR">♖</span>
-                        <span class="palette-piece" data-piece="wB">♗</span>
-                        <span class="palette-piece" data-piece="wN">♘</span>
-                        <span class="palette-piece" data-piece="wP">♙</span>
+                    <!-- Edit Actions -->
+                    <div class="edit-actions">
+                        <button class="btn btn-sm btn-outline" id="resetBoardBtn" title="Reset to original">↩️ Reset</button>
+                        <button class="btn btn-sm btn-primary" id="doneEditingBtn">✓ Done</button>
                     </div>
-                    <div class="palette-row">
-                        <span class="palette-piece" data-piece="bK">♚</span>
-                        <span class="palette-piece" data-piece="bQ">♛</span>
-                        <span class="palette-piece" data-piece="bR">♜</span>
-                        <span class="palette-piece" data-piece="bB">♝</span>
-                        <span class="palette-piece" data-piece="bN">♞</span>
-                        <span class="palette-piece" data-piece="bP">♟</span>
-                    </div>
-                    <div class="palette-row">
-                        <span class="palette-piece selected" data-piece="empty">⬜</span>
-                        <span class="palette-hint">Click piece, then click square</span>
-                    </div>
-                </div>
-
-                <!-- Correction Notice -->
-                <div class="correction-notice" id="correctionNotice" hidden>
-                    <span class="correction-text">📝 <span id="correctionCount">0</span> corrections made</span>
-                    <button class="btn btn-sm btn-success" id="submitCorrectionsBtn">✅ Submit for Training</button>
                 </div>
 
                 <!-- Analyze on Chess.com -->
@@ -227,7 +225,7 @@
         </footer>
     </div>
 
-    <script src="config.js?v=11"></script>
-    <script src="app.js?v=11"></script>
+    <script src="config.js?v=18"></script>
+    <script src="app.js?v=18"></script>
 </body>
 </html>
