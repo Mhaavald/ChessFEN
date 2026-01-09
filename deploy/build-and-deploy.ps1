@@ -29,11 +29,11 @@ Set-Location "$PSScriptRoot\.."
 docker build -t $imageTag -t $imageLatest -f deploy/Dockerfile .
 
 if ($LASTEXITCODE -ne 0) {
-    Write-Host "✗ Docker build failed" -ForegroundColor Red
+    Write-Host "[X] Docker build failed" -ForegroundColor Red
     exit 1
 }
 
-Write-Host "✓ Image built: $imageTag" -ForegroundColor Green
+Write-Host "[OK] Image built: $imageTag" -ForegroundColor Green
 
 # Step 3: Push to Azure Container Registry
 Write-Host ""
@@ -42,11 +42,11 @@ docker push $imageTag
 docker push $imageLatest
 
 if ($LASTEXITCODE -ne 0) {
-    Write-Host "✗ Docker push failed" -ForegroundColor Red
+    Write-Host "[X] Docker push failed" -ForegroundColor Red
     exit 1
 }
 
-Write-Host "✓ Image pushed successfully" -ForegroundColor Green
+Write-Host "[OK] Image pushed successfully" -ForegroundColor Green
 
 # Step 4: Update Azure Container App
 Write-Host ""
@@ -57,13 +57,13 @@ az containerapp update `
     --image $imageTag
 
 if ($LASTEXITCODE -ne 0) {
-    Write-Host "✗ Container App update failed" -ForegroundColor Red
+    Write-Host "[X] Container App update failed" -ForegroundColor Red
     exit 1
 }
 
 Write-Host ""
 Write-Host "========================================" -ForegroundColor Green
-Write-Host "✓ Deployment Complete!" -ForegroundColor Green
+Write-Host "[OK] Deployment Complete!" -ForegroundColor Green
 Write-Host "========================================" -ForegroundColor Green
 Write-Host ""
 Write-Host "Version: $Version" -ForegroundColor Cyan

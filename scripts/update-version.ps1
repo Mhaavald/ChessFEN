@@ -34,10 +34,10 @@ $versionInfo = @{
 }
 
 # Write to version.json
-$versionPath = Join-Path $PSScriptRoot ".." "version.json"
+$versionPath = Join-Path (Join-Path $PSScriptRoot "..") "version.json"
 $versionInfo | ConvertTo-Json -Depth 10 | Set-Content $versionPath -Encoding UTF8
 
-Write-Host "✓ Updated version.json:"
+Write-Host "[OK] Updated version.json:"
 Write-Host "  Version: $Version"
 Write-Host "  Build: $BuildNumber"
 Write-Host "  Commit: $commit"
