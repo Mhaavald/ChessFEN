@@ -228,10 +228,15 @@ body {
 /* Input Options */
 .input-options {
     display: flex;
-    flex-direction: column;
+    flex-direction: row;
     gap: 12px;
     align-items: center;
-    margin-bottom: 16px;
+    justify-content: center;
+}
+
+.input-options .btn {
+    flex: 1;
+    max-width: 140px;
 }
 
 .or-divider {
@@ -240,7 +245,6 @@ body {
 }
 
 .file-label {
-    width: 100%;
     text-align: center;
 }
 
@@ -707,6 +711,14 @@ body {
     font-size: 14px;
     margin-top: 8px;
     text-shadow: 0 0 4px black;
+    line-height: 1.4;
+}
+
+.guide-text small {
+    font-size: 11px;
+    color: #cccccc;
+    display: block;
+    margin-top: 4px;
 }
 
 .camera-status {
@@ -1091,10 +1103,17 @@ body {
 /* Skip detection row in input section */
 .skip-detection-row {
     display: flex;
-    justify-content: center;
+    flex-direction: column;
+    align-items: center;
     margin-top: 8px;
     padding-top: 8px;
     border-top: 1px solid var(--border);
+}
+
+.skip-detection-row .help-text {
+    color: var(--text-muted);
+    font-size: 0.75rem;
+    margin-top: 4px;
 }
 
 /* Edit Mode - Reference Image (above board) */

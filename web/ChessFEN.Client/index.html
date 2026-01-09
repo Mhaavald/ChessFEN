@@ -5,10 +5,15 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
     <title>Chess FEN Scanner</title>
     <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>♔</text></svg>">
-    <link rel="stylesheet" href="styles.css?v=18">
+    <link rel="stylesheet" href="styles.css?v=19">
 </head>
 <body>
     <div class="app">
+        <!-- Header -->
+        <header class="header">
+            <h1>♔ Chess FEN Scanner</h1>
+        </header>
+
         <!-- Main Content -->
         <main class="main">
             <!-- Image Input -->
@@ -29,6 +34,7 @@
                         <input type="checkbox" id="skipDetection">
                         <span>Skip board detection</span>
                     </label>
+                    <small class="help-text">Use if auto-detection fails on a cropped board image</small>
                 </div>
             </section>
 
@@ -183,7 +189,7 @@
                     <video id="cameraVideo" autoplay playsinline muted></video>
                     <div class="camera-guide">
                         <div class="guide-square"></div>
-                        <div class="guide-text">Align board here</div>
+                        <div class="guide-text">Align board here<br><small>Hold steady, good lighting for best results</small></div>
                     </div>
                 </div>
                 <div class="camera-status" id="cameraStatus">Initializing camera...</div>
