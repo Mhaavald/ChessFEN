@@ -579,7 +579,7 @@ async function displayResults() {
     elements.analyzeBlackBtn.href = `${CONFIG.CHESS_COM_ANALYSIS_URL}?fen=${encodeURIComponent(blackFen)}&flip=true&tab=analysis`;
     
     // Set Lichess link (uses white to move by default, user can change in Lichess editor)
-    elements.playLichessBtn.href = `https://lichess.org/editor?fen=${encodeURIComponent(whiteFen)}`;
+    elements.playLichessBtn.href = `https://lichess.org/editor/${whiteFen.replace(/ /g, '_')}`;
     
     // Auto-check for games
     checkForGames();
@@ -948,7 +948,7 @@ function handleSquareClick(row, col) {
     const blackFen = `${state.resultFen} b ${castling} - 0 1`;
     elements.analyzeWhiteBtn.href = `${CONFIG.CHESS_COM_ANALYSIS_URL}?fen=${encodeURIComponent(whiteFen)}&flip=false&tab=analysis`;
     elements.analyzeBlackBtn.href = `${CONFIG.CHESS_COM_ANALYSIS_URL}?fen=${encodeURIComponent(blackFen)}&flip=true&tab=analysis`;
-    elements.playLichessBtn.href = `https://lichess.org/editor?fen=${encodeURIComponent(whiteFen)}`;
+    elements.playLichessBtn.href = `https://lichess.org/editor/${whiteFen.replace(/ /g, '_')}`;
     
     // Re-render board only
     renderBoard();
@@ -985,7 +985,7 @@ async function resetBoard() {
     const blackFen = `${state.resultFen} b ${castling} - 0 1`;
     elements.analyzeWhiteBtn.href = `${CONFIG.CHESS_COM_ANALYSIS_URL}?fen=${encodeURIComponent(whiteFen)}&flip=false&tab=analysis`;
     elements.analyzeBlackBtn.href = `${CONFIG.CHESS_COM_ANALYSIS_URL}?fen=${encodeURIComponent(blackFen)}&flip=true&tab=analysis`;
-    elements.playLichessBtn.href = `https://lichess.org/editor?fen=${encodeURIComponent(whiteFen)}`;
+    elements.playLichessBtn.href = `https://lichess.org/editor/${whiteFen.replace(/ /g, '_')}`;
 
     showToast('Board reset to original');
 }
