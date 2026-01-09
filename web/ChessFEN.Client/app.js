@@ -9,7 +9,6 @@ const CONFIG = {
     DOTNET_API_BASE: window.APP_CONFIG?.DOTNET_API_BASE || 'http://localhost:5001/api/chess',
     CHESS_COM_SEARCH_URL: window.APP_CONFIG?.CHESS_COM_SEARCH_URL || 'https://www.chess.com/games/search',
     CHESS_COM_ANALYSIS_URL: 'https://www.chess.com/analysis',
-    CHESS_COM_PLAY_URL: 'https://www.chess.com/analysis',
     CAPTURE_SIZE: 1024,  // Increased from 512 for better quality
     PIECE_UNICODE: {
         'wK': '♔', 'wQ': '♕', 'wR': '♖', 'wB': '♗', 'wN': '♘', 'wP': '♙',
@@ -61,8 +60,6 @@ function cacheElements() {
     elements.fenHint = document.getElementById('fenHint');
     elements.analyzeWhiteBtn = document.getElementById('analyzeWhiteBtn');
     elements.analyzeBlackBtn = document.getElementById('analyzeBlackBtn');
-    elements.playWhiteBtn = document.getElementById('playWhiteBtn');
-    elements.playBlackBtn = document.getElementById('playBlackBtn');
     elements.newScanBtn = document.getElementById('newScanBtn');
     elements.retryBtn = document.getElementById('retryBtn');
     
@@ -93,6 +90,9 @@ function cacheElements() {
     elements.noGamesFound = document.getElementById('noGamesFound');
     elements.whiteGameIcon = document.getElementById('whiteGameIcon');
     elements.blackGameIcon = document.getElementById('blackGameIcon');
+    
+    // Lichess element
+    elements.playLichessBtn = document.getElementById('playLichessBtn');
 }
 
 function bindEvents() {
@@ -578,9 +578,8 @@ async function displayResults() {
     elements.analyzeWhiteBtn.href = `${CONFIG.CHESS_COM_ANALYSIS_URL}?fen=${encodeURIComponent(whiteFen)}&flip=false&tab=analysis`;
     elements.analyzeBlackBtn.href = `${CONFIG.CHESS_COM_ANALYSIS_URL}?fen=${encodeURIComponent(blackFen)}&flip=true&tab=analysis`;
     
-    // Set Chess.com play links
-    elements.playWhiteBtn.href = `${CONFIG.CHESS_COM_PLAY_URL}?fen=${encodeURIComponent(whiteFen)}&flip=false&tab=play`;
-    elements.playBlackBtn.href = `${CONFIG.CHESS_COM_PLAY_URL}?fen=${encodeURIComponent(blackFen)}&flip=true&tab=play`;
+    // Set Lichess link (uses white to move by default, user can change in Lichess editor)
+    elements.playLichessBtn.href = `https://lichess.org/editor?fen=${encodeURIComponent(whiteFen)}`;
     
     // Auto-check for games
     checkForGames();
@@ -949,8 +948,7 @@ function handleSquareClick(row, col) {
     const blackFen = `${state.resultFen} b ${castling} - 0 1`;
     elements.analyzeWhiteBtn.href = `${CONFIG.CHESS_COM_ANALYSIS_URL}?fen=${encodeURIComponent(whiteFen)}&flip=false&tab=analysis`;
     elements.analyzeBlackBtn.href = `${CONFIG.CHESS_COM_ANALYSIS_URL}?fen=${encodeURIComponent(blackFen)}&flip=true&tab=analysis`;
-    elements.playWhiteBtn.href = `${CONFIG.CHESS_COM_PLAY_URL}?fen=${encodeURIComponent(whiteFen)}&flip=false&tab=play`;
-    elements.playBlackBtn.href = `${CONFIG.CHESS_COM_PLAY_URL}?fen=${encodeURIComponent(blackFen)}&flip=true&tab=play`;
+    elements.playLichessBtn.href = `https://lichess.org/editor?fen=${encodeURIComponent(whiteFen)}`;
     
     // Re-render board only
     renderBoard();
@@ -987,8 +985,7 @@ async function resetBoard() {
     const blackFen = `${state.resultFen} b ${castling} - 0 1`;
     elements.analyzeWhiteBtn.href = `${CONFIG.CHESS_COM_ANALYSIS_URL}?fen=${encodeURIComponent(whiteFen)}&flip=false&tab=analysis`;
     elements.analyzeBlackBtn.href = `${CONFIG.CHESS_COM_ANALYSIS_URL}?fen=${encodeURIComponent(blackFen)}&flip=true&tab=analysis`;
-    elements.playWhiteBtn.href = `${CONFIG.CHESS_COM_PLAY_URL}?fen=${encodeURIComponent(whiteFen)}&flip=false&tab=play`;
-    elements.playBlackBtn.href = `${CONFIG.CHESS_COM_PLAY_URL}?fen=${encodeURIComponent(blackFen)}&flip=true&tab=play`;
+    elements.playLichessBtn.href = `https://lichess.org/editor?fen=${encodeURIComponent(whiteFen)}`;
 
     showToast('Board reset to original');
 }
