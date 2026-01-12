@@ -481,6 +481,74 @@ public class ChessController : ControllerBase
     }
 
     /// <summary>
+    /// Get feedback statistics (admin endpoint)
+    /// </summary>
+    [HttpGet("feedback/stats")]
+    public async Task<ActionResult<object>> GetFeedbackStats()
+    {
+        // Check admin authorization
+        var authResult = CheckAuthorization(requireAdmin: true);
+        if (authResult != null) return authResult;
+
+        try
+        {
+            var client = _httpClientFactory.CreateClient("InferenceService");
+            var response = await client.GetAsync("/api/chess/feedback/stats");
+            var json = await response.Content.ReadAsStringAsync();
+            return Content(json, "application/json");
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Error getting feedback stats");
+            return StatusCode(500, new { error = ex.Message });
+        }
+    }
+
+    /// <summary>
+    /// Accept a feedback item (admin endpoint)
+    /// </summary>
+    [HttpPost("feedback/{feedbackId}/accept")]
+    public async Task<ActionResult<object>> AcceptFeedback(string feedbackId)
+    {
+        return await ProcessFeedbackAction(feedbackId, "accept");
+    }
+
+    /// <summary>
+    /// Reject a feedback item (admin endpoint)
+    /// </summary>
+    [HttpPost("feedback/{feedbackId}/reject")]
+    public async Task<ActionResult<object>> RejectFeedback(string feedbackId)
+    {
+        return await ProcessFeedbackAction(feedbackId, "reject");
+    }
+
+    private async Task<ActionResult<object>> ProcessFeedbackAction(string feedbackId, string action)
+    {
+        // Check admin authorization
+        var authResult = CheckAuthorization(requireAdmin: true);
+        if (authResult != null) return authResult;
+
+        try
+        {
+            var client = _httpClientFactory.CreateClient("InferenceService");
+            var response = await client.PostAsync($"/api/chess/feedback/{feedbackId}/{action}", null);
+            var json = await response.Content.ReadAsStringAsync();
+            
+            if (!response.IsSuccessStatusCode)
+            {
+                return StatusCode((int)response.StatusCode, json);
+            }
+            
+            return Content(json, "application/json");
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Error processing feedback {FeedbackId} action {Action}", feedbackId, action);
+            return StatusCode(500, new { error = ex.Message });
+        }
+    }
+
+    /// <summary>
     /// Get user statistics (admin endpoint)
     /// </summary>
     [HttpGet("admin/statistics")]

@@ -1,0 +1,904 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>ChessFEN - Feedback Review</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, sans-serif;
+            background: linear-gradient(135deg, #1a1a2e 0%, #16213e 100%);
+            min-height: 100vh;
+            padding: 1rem;
+            color: #e0e0e0;
+        }
+
+        .container {
+            max-width: 1400px;
+            margin: 0 auto;
+        }
+
+        .header {
+            background: rgba(255, 255, 255, 0.1);
+            backdrop-filter: blur(10px);
+            padding: 1.5rem;
+            border-radius: 1rem;
+            margin-bottom: 1.5rem;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            flex-wrap: wrap;
+            gap: 1rem;
+        }
+
+        .header h1 {
+            color: #fff;
+            font-size: 1.5rem;
+        }
+
+        .header-stats {
+            display: flex;
+            gap: 1.5rem;
+        }
+
+        .header-stat {
+            text-align: center;
+        }
+
+        .header-stat .value {
+            font-size: 1.5rem;
+            font-weight: bold;
+            color: #4ecdc4;
+        }
+
+        .header-stat .label {
+            font-size: 0.75rem;
+            color: #888;
+            text-transform: uppercase;
+        }
+
+        .nav-links {
+            display: flex;
+            gap: 1rem;
+        }
+
+        .nav-links a {
+            color: #4ecdc4;
+            text-decoration: none;
+        }
+
+        .nav-links a:hover {
+            text-decoration: underline;
+        }
+
+        .loading, .error, .empty {
+            background: rgba(255, 255, 255, 0.1);
+            padding: 3rem;
+            border-radius: 1rem;
+            text-align: center;
+        }
+
+        .error {
+            color: #ff6b6b;
+        }
+
+        .feedback-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fill, minmax(400px, 1fr));
+            gap: 1.5rem;
+        }
+
+        .feedback-card {
+            background: rgba(255, 255, 255, 0.1);
+            backdrop-filter: blur(10px);
+            border-radius: 1rem;
+            overflow: hidden;
+            transition: transform 0.2s;
+        }
+
+        .feedback-card:hover {
+            transform: translateY(-2px);
+        }
+
+        .feedback-card.processing {
+            opacity: 0.5;
+            pointer-events: none;
+        }
+
+        .card-header {
+            padding: 1rem;
+            background: rgba(0, 0, 0, 0.2);
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+
+        .feedback-id {
+            font-family: monospace;
+            color: #4ecdc4;
+            font-size: 0.9rem;
+        }
+
+        .timestamp {
+            font-size: 0.8rem;
+            color: #888;
+        }
+
+        .board-container {
+            position: relative;
+            padding: 1rem;
+        }
+
+        .board-wrapper {
+            position: relative;
+            width: 256px;
+            margin: 0 auto;
+        }
+
+        .chess-board {
+            display: grid;
+            grid-template-columns: repeat(8, 32px);
+            grid-template-rows: repeat(8, 32px);
+            width: 256px;
+            height: 256px;
+            border: 2px solid #4ecdc4;
+            border-radius: 4px;
+            overflow: visible;
+        }
+
+        .square {
+            width: 32px;
+            height: 32px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 1.6rem;
+            position: relative;
+        }
+
+        .piece-white {
+            color: #fff;
+            text-shadow: 
+                -1px -1px 0 #333,
+                1px -1px 0 #333,
+                -1px 1px 0 #333,
+                1px 1px 0 #333;
+        }
+
+        .piece-black {
+            color: #222;
+            text-shadow: 
+                -1px -1px 0 #888,
+                1px -1px 0 #888,
+                -1px 1px 0 #888,
+                1px 1px 0 #888;
+        }
+
+        .square.light {
+            background: #f0d9b5;
+        }
+
+        .square.dark {
+            background: #b58863;
+        }
+
+        .square.corrected {
+            box-shadow: inset 0 0 0 3px #ff6b6b;
+            animation: pulse 1.5s ease-in-out infinite;
+        }
+
+        @keyframes pulse {
+            0%, 100% { box-shadow: inset 0 0 0 3px #ff6b6b; }
+            50% { box-shadow: inset 0 0 0 5px #ff6b6b; }
+        }
+
+        .correction-badge {
+            position: absolute;
+            top: 2px;
+            right: 2px;
+            background: #ff6b6b;
+            color: white;
+            font-size: 0.6rem;
+            padding: 1px 4px;
+            border-radius: 3px;
+            font-weight: bold;
+        }
+
+        .card-details {
+            padding: 1rem;
+            background: rgba(0, 0, 0, 0.2);
+        }
+
+        .detail-row {
+            display: flex;
+            justify-content: space-between;
+            margin-bottom: 0.5rem;
+            font-size: 0.85rem;
+        }
+
+        .detail-label {
+            color: #888;
+        }
+
+        .corrections-list {
+            margin-top: 0.75rem;
+            padding-top: 0.75rem;
+            border-top: 1px solid rgba(255, 255, 255, 0.1);
+        }
+
+        .corrections-title {
+            font-size: 0.8rem;
+            color: #ff6b6b;
+            margin-bottom: 0.5rem;
+            font-weight: 600;
+        }
+
+        .correction-item {
+            display: flex;
+            align-items: center;
+            gap: 0.5rem;
+            font-size: 0.85rem;
+            margin-bottom: 0.25rem;
+        }
+
+        .correction-square {
+            font-family: monospace;
+            color: #4ecdc4;
+            font-weight: bold;
+        }
+
+        .correction-arrow {
+            color: #888;
+        }
+
+        .correction-piece {
+            font-size: 1.2rem;
+        }
+
+        .card-actions {
+            display: flex;
+            gap: 0.5rem;
+            padding: 1rem;
+        }
+
+        .btn {
+            flex: 1;
+            padding: 0.75rem 1rem;
+            border: none;
+            border-radius: 0.5rem;
+            cursor: pointer;
+            font-weight: 600;
+            font-size: 0.9rem;
+            transition: all 0.2s;
+        }
+
+        .btn-accept {
+            background: #4ecdc4;
+            color: #1a1a2e;
+        }
+
+        .btn-accept:hover {
+            background: #3dbdb5;
+            transform: translateY(-1px);
+        }
+
+        .btn-reject {
+            background: #ff6b6b;
+            color: white;
+        }
+
+        .btn-reject:hover {
+            background: #ff5252;
+            transform: translateY(-1px);
+        }
+
+        .btn:disabled {
+            opacity: 0.5;
+            cursor: not-allowed;
+            transform: none;
+        }
+
+        .piece-map {
+            display: none;
+        }
+
+        /* Toast notification */
+        .toast {
+            position: fixed;
+            bottom: 2rem;
+            left: 50%;
+            transform: translateX(-50%);
+            padding: 1rem 2rem;
+            border-radius: 0.5rem;
+            font-weight: 600;
+            z-index: 1000;
+            animation: slideUp 0.3s ease;
+        }
+
+        .toast.success {
+            background: #4ecdc4;
+            color: #1a1a2e;
+        }
+
+        .toast.error {
+            background: #ff6b6b;
+            color: white;
+        }
+
+        @keyframes slideUp {
+            from {
+                opacity: 0;
+                transform: translateX(-50%) translateY(20px);
+            }
+            to {
+                opacity: 1;
+                transform: translateX(-50%) translateY(0);
+            }
+        }
+
+        .summary-section {
+            background: rgba(255, 255, 255, 0.1);
+            backdrop-filter: blur(10px);
+            border-radius: 1rem;
+            padding: 1.5rem;
+            margin-bottom: 1.5rem;
+        }
+
+        .summary-section h2 {
+            color: #4ecdc4;
+            margin-bottom: 1rem;
+            font-size: 1.2rem;
+        }
+
+        .summary-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+            gap: 1rem;
+        }
+
+        .summary-card {
+            background: rgba(0, 0, 0, 0.2);
+            padding: 1rem;
+            border-radius: 0.5rem;
+        }
+
+        .summary-card h3 {
+            color: #888;
+            font-size: 0.8rem;
+            text-transform: uppercase;
+            margin-bottom: 0.75rem;
+        }
+
+        .piece-stats {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 0.5rem;
+        }
+
+        .piece-stat {
+            display: flex;
+            align-items: center;
+            gap: 0.25rem;
+            background: rgba(255, 255, 255, 0.1);
+            padding: 0.25rem 0.5rem;
+            border-radius: 0.25rem;
+            font-size: 0.85rem;
+        }
+
+        .piece-stat .piece {
+            font-size: 1.2rem;
+        }
+
+        .stat-value {
+            font-size: 1.5rem;
+            font-weight: bold;
+            color: #4ecdc4;
+        }
+
+        .stat-row {
+            display: flex;
+            justify-content: space-between;
+            margin-bottom: 0.25rem;
+            font-size: 0.9rem;
+        }
+
+        .stat-label {
+            color: #888;
+        }
+
+        @media (max-width: 600px) {
+            .feedback-grid {
+                grid-template-columns: 1fr;
+            }
+
+            .header {
+                flex-direction: column;
+                text-align: center;
+            }
+
+            .header-stats {
+                justify-content: center;
+            }
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="header">
+            <div>
+                <h1>📋 Feedback Review</h1>
+                <div class="nav-links">
+                    <a href="/">← Back to App</a>
+                    <a href="/admin.html">Admin Dashboard</a>
+                </div>
+            </div>
+            <div class="header-stats">
+                <div class="header-stat">
+                    <div class="value" id="pendingCount">-</div>
+                    <div class="label">Pending</div>
+                </div>
+                <div class="header-stat">
+                    <div class="value" id="acceptedCount">-</div>
+                    <div class="label">Accepted</div>
+                </div>
+                <div class="header-stat">
+                    <div class="value" id="rejectedCount">-</div>
+                    <div class="label">Rejected</div>
+                </div>
+            </div>
+        </div>
+
+        <div id="summarySection" class="summary-section" style="display: none;">
+            <h2>📊 Feedback Summary</h2>
+            <div class="summary-grid">
+                <div class="summary-card">
+                    <h3>Corrections per Position</h3>
+                    <div class="stat-row">
+                        <span class="stat-label">Min:</span>
+                        <span id="statMin">-</span>
+                    </div>
+                    <div class="stat-row">
+                        <span class="stat-label">Max:</span>
+                        <span id="statMax">-</span>
+                    </div>
+                    <div class="stat-row">
+                        <span class="stat-label">Average:</span>
+                        <span id="statAvg">-</span>
+                    </div>
+                    <div class="stat-row">
+                        <span class="stat-label">Total corrections:</span>
+                        <span id="statTotal">-</span>
+                    </div>
+                </div>
+                <div class="summary-card">
+                    <h3>Corrections by Piece (To)</h3>
+                    <div class="piece-stats" id="pieceStatsTo"></div>
+                </div>
+                <div class="summary-card">
+                    <h3>Corrections by Piece (From)</h3>
+                    <div class="piece-stats" id="pieceStatsFrom"></div>
+                </div>
+            </div>
+        </div>
+
+        <div id="content">
+            <div class="loading">Loading feedback...</div>
+        </div>
+    </div>
+
+    <script src="config.js"></script>
+    <script>
+        const PIECE_UNICODE = {
+            'wK': '♔', 'wQ': '♕', 'wR': '♖', 'wB': '♗', 'wN': '♘', 'wP': '♙',
+            'bK': '♚', 'bQ': '♛', 'bR': '♜', 'bB': '♝', 'bN': '♞', 'bP': '♟',
+            'empty': '·'
+        };
+
+        const PIECE_NAMES = {
+            'wK': 'White King', 'wQ': 'White Queen', 'wR': 'White Rook', 
+            'wB': 'White Bishop', 'wN': 'White Knight', 'wP': 'White Pawn',
+            'bK': 'Black King', 'bQ': 'Black Queen', 'bR': 'Black Rook', 
+            'bB': 'Black Bishop', 'bN': 'Black Knight', 'bP': 'Black Pawn',
+            'empty': 'Empty'
+        };
+
+        // Use API_BASE from config.js (window.APP_CONFIG.API_BASE)
+        const apiBase = window.APP_CONFIG?.API_BASE || '/api/chess';
+
+        // Helper to get piece at square from FEN
+        function getPieceAtSquare(fen, square) {
+            if (!fen || !square) return 'empty';
+            const board = fenToBoard(fen);
+            const files = 'abcdefgh';
+            const col = files.indexOf(square[0]);
+            const row = 8 - parseInt(square[1]);
+            if (row >= 0 && row < 8 && col >= 0 && col < 8) {
+                return board[row]?.[col] || 'empty';
+            }
+            return 'empty';
+        }
+
+        async function fetchWithTimeout(url, options = {}, timeout = 10000) {
+            const controller = new AbortController();
+            const id = setTimeout(() => controller.abort(), timeout);
+            
+            try {
+                const response = await fetch(url, {
+                    ...options,
+                    signal: controller.signal
+                });
+                clearTimeout(id);
+                return response;
+            } catch (error) {
+                clearTimeout(id);
+                if (error.name === 'AbortError') {
+                    throw new Error('Request timed out');
+                }
+                throw error;
+            }
+        }
+
+        function calculateStats(items) {
+            const pieceCountsTo = {};
+            const pieceCountsFrom = {};
+            const correctionsPerPosition = [];
+            let totalCorrections = 0;
+
+            items.forEach(item => {
+                const corrections = item.corrected_squares || {};
+                const count = Object.keys(corrections).length;
+                correctionsPerPosition.push(count);
+                totalCorrections += count;
+
+                // Count pieces corrected TO
+                Object.entries(corrections).forEach(([square, toPiece]) => {
+                    pieceCountsTo[toPiece] = (pieceCountsTo[toPiece] || 0) + 1;
+                    
+                    // Count pieces corrected FROM
+                    const fromPiece = getPieceAtSquare(item.original_fen, square);
+                    pieceCountsFrom[fromPiece] = (pieceCountsFrom[fromPiece] || 0) + 1;
+                });
+            });
+
+            const min = correctionsPerPosition.length > 0 ? Math.min(...correctionsPerPosition) : 0;
+            const max = correctionsPerPosition.length > 0 ? Math.max(...correctionsPerPosition) : 0;
+            const avg = correctionsPerPosition.length > 0 
+                ? (correctionsPerPosition.reduce((a, b) => a + b, 0) / correctionsPerPosition.length).toFixed(1) 
+                : 0;
+
+            return { pieceCountsTo, pieceCountsFrom, min, max, avg, totalCorrections };
+        }
+
+        function renderPieceStats(pieceCounts, containerId, totalCorrections) {
+            const container = document.getElementById(containerId);
+            if (!container) return;
+
+            // Sort by count descending
+            const sorted = Object.entries(pieceCounts).sort((a, b) => b[1] - a[1]);
+            
+            container.innerHTML = sorted.map(([piece, count]) => {
+                const pct = totalCorrections > 0 ? ((count / totalCorrections) * 100).toFixed(0) : 0;
+                const pieceClass = piece.startsWith('w') ? 'piece-white' : (piece.startsWith('b') ? 'piece-black' : '');
+                return `
+                    <div class="piece-stat" title="${PIECE_NAMES[piece] || piece}">
+                        <span class="piece ${pieceClass}">${PIECE_UNICODE[piece] || piece}</span>
+                        <span>${count} (${pct}%)</span>
+                    </div>
+                `;
+            }).join('');
+        }
+
+        function displayStats(items) {
+            const stats = calculateStats(items);
+            
+            document.getElementById('statMin').textContent = stats.min;
+            document.getElementById('statMax').textContent = stats.max;
+            document.getElementById('statAvg').textContent = stats.avg;
+            document.getElementById('statTotal').textContent = stats.totalCorrections;
+            
+            renderPieceStats(stats.pieceCountsTo, 'pieceStatsTo', stats.totalCorrections);
+            renderPieceStats(stats.pieceCountsFrom, 'pieceStatsFrom', stats.totalCorrections);
+            
+            document.getElementById('summarySection').style.display = 'block';
+        }
+
+        async function loadFeedback() {
+            const content = document.getElementById('content');
+            console.log('[FeedbackReview] Loading feedback from:', `${apiBase}/feedback`);
+            
+            try {
+                const response = await fetchWithTimeout(`${apiBase}/feedback`);
+                console.log('[FeedbackReview] Response status:', response.status);
+                
+                if (response.status === 403 || response.status === 401) {
+                    content.innerHTML = `<div class="error">Access denied. Admin privileges required.</div>`;
+                    return;
+                }
+                
+                if (!response.ok) {
+                    throw new Error(`HTTP ${response.status}`);
+                }
+                
+                const data = await response.json();
+                console.log('[FeedbackReview] Loaded', data?.length || 0, 'items');
+                
+                // Also load stats
+                await loadStats();
+                
+                if (!data || data.length === 0) {
+                    content.innerHTML = `<div class="empty">No pending feedback to review! 🎉</div>`;
+                    document.getElementById('pendingCount').textContent = '0';
+                    return;
+                }
+                
+                // Display summary statistics
+                displayStats(data);
+                
+                document.getElementById('pendingCount').textContent = data.length;
+                renderFeedbackGrid(data);
+                
+            } catch (error) {
+                console.error('Error loading feedback:', error);
+                content.innerHTML = `<div class="error">Error loading feedback: ${error.message}</div>`;
+            }
+        }
+
+        async function loadStats() {
+            try {
+                const response = await fetch(`${apiBase}/feedback/stats`);
+                if (response.ok) {
+                    const stats = await response.json();
+                    document.getElementById('acceptedCount').textContent = stats.accepted || 0;
+                    document.getElementById('rejectedCount').textContent = stats.rejected || 0;
+                }
+            } catch (error) {
+                console.log('Stats not available:', error);
+            }
+        }
+
+        function renderFeedbackGrid(items) {
+            const content = document.getElementById('content');
+            content.innerHTML = `<div class="feedback-grid" id="feedbackGrid"></div>`;
+            const grid = document.getElementById('feedbackGrid');
+            
+            items.forEach(item => {
+                try {
+                    grid.appendChild(createFeedbackCard(item));
+                } catch (error) {
+                    console.error('Error creating card for item:', item.id, error);
+                }
+            });
+        }
+
+        function createFeedbackCard(item) {
+            const card = document.createElement('div');
+            card.className = 'feedback-card';
+            card.id = `card-${item.id}`;
+            
+            const timestamp = item.timestamp ? new Date(item.timestamp).toLocaleString() : 'Unknown';
+            const corrections = item.corrected_squares || {};
+            const correctionCount = Object.keys(corrections).length;
+            
+            // Parse FEN to board (handles null/empty gracefully)
+            const board = fenToBoard(item.corrected_fen);
+            
+            // Build corrections HTML with from/to info
+            const correctionsHtml = Object.entries(corrections).map(([square, toPiece]) => {
+                const fromPiece = getPieceAtSquare(item.original_fen, square);
+                const fromClass = fromPiece.startsWith('w') ? 'piece-white' : (fromPiece.startsWith('b') ? 'piece-black' : '');
+                const toClass = toPiece.startsWith('w') ? 'piece-white' : (toPiece.startsWith('b') ? 'piece-black' : '');
+                return `
+                    <div class="correction-item">
+                        <span class="correction-square">${square}:</span>
+                        <span class="${fromClass}" style="font-size: 1.2rem;">${PIECE_UNICODE[fromPiece] || '·'}</span>
+                        <span class="correction-arrow">→</span>
+                        <span class="${toClass}" style="font-size: 1.2rem;">${PIECE_UNICODE[toPiece] || toPiece}</span>
+                        <span style="color: #888; font-size: 0.7rem;">(${fromPiece} → ${toPiece})</span>
+                    </div>
+                `;
+            }).join('');
+            
+            card.innerHTML = `
+                <div class="card-header">
+                    <span class="feedback-id">#${item.id}</span>
+                    <span class="timestamp">${timestamp}</span>
+                </div>
+                <div class="board-container">
+                    <div class="board-wrapper">
+                        ${renderBoard(board, corrections)}
+                    </div>
+                </div>
+                <div class="card-details">
+                    <div class="detail-row">
+                        <span class="detail-label">Model:</span>
+                        <span>${item.model_name || 'unknown'}</span>
+                    </div>
+                    <div class="detail-row">
+                        <span class="detail-label">User:</span>
+                        <span>${item.user_email || 'anonymous'}</span>
+                    </div>
+                    ${correctionCount > 0 ? `
+                        <div class="corrections-list">
+                            <div class="corrections-title">Corrections (${correctionCount}):</div>
+                            ${correctionsHtml}
+                        </div>
+                    ` : ''}
+                </div>
+                <div class="card-actions">
+                    <button class="btn btn-accept" onclick="acceptFeedback('${item.id}')">
+                        ✓ Accept
+                    </button>
+                    <button class="btn btn-reject" onclick="rejectFeedback('${item.id}')">
+                        ✗ Reject
+                    </button>
+                </div>
+            `;
+            
+            return card;
+        }
+
+        function fenToBoard(fen) {
+            const board = [];
+            if (!fen) {
+                // Return empty 8x8 board
+                for (let i = 0; i < 8; i++) {
+                    board.push(Array(8).fill('empty'));
+                }
+                return board;
+            }
+            
+            // Only take the piece placement part of the FEN
+            const fenParts = fen.split(' ');
+            const rows = fenParts[0].split('/');
+            
+            for (const row of rows) {
+                const boardRow = [];
+                for (const char of row) {
+                    if (char >= '1' && char <= '8') {
+                        for (let i = 0; i < parseInt(char); i++) {
+                            boardRow.push('empty');
+                        }
+                    } else {
+                        const color = char === char.toUpperCase() ? 'w' : 'b';
+                        const piece = char.toUpperCase();
+                        boardRow.push(color + piece);
+                    }
+                }
+                board.push(boardRow);
+            }
+            
+            return board;
+        }
+
+        function renderBoard(board, corrections) {
+            let html = '<div class="chess-board">';
+            const files = 'abcdefgh';
+            
+            for (let row = 0; row < 8; row++) {
+                for (let col = 0; col < 8; col++) {
+                    const isLight = (row + col) % 2 === 0;
+                    const square = files[col] + (8 - row);
+                    const isCorrected = corrections && corrections[square];
+                    const piece = board[row] && board[row][col] ? board[row][col] : 'empty';
+                    const pieceUnicode = PIECE_UNICODE[piece] || '';
+                    const pieceColor = piece.startsWith('w') ? 'piece-white' : (piece.startsWith('b') ? 'piece-black' : '');
+                    
+                    html += `
+                        <div class="square ${isLight ? 'light' : 'dark'} ${isCorrected ? 'corrected' : ''}">
+                            <span class="${pieceColor}">${pieceUnicode}</span>
+                            ${isCorrected ? `<span class="correction-badge">${square}</span>` : ''}
+                        </div>
+                    `;
+                }
+            }
+            
+            html += '</div>';
+            return html;
+        }
+
+        async function acceptFeedback(feedbackId) {
+            await processFeedback(feedbackId, 'accept');
+        }
+
+        async function rejectFeedback(feedbackId) {
+            await processFeedback(feedbackId, 'reject');
+        }
+
+        async function processFeedback(feedbackId, action) {
+            const card = document.getElementById(`card-${feedbackId}`);
+            if (!card) return;
+            
+            card.classList.add('processing');
+            
+            try {
+                const response = await fetch(`${apiBase}/feedback/${feedbackId}/${action}`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' }
+                });
+                
+                if (!response.ok) {
+                    throw new Error(`HTTP ${response.status}`);
+                }
+                
+                // Remove card with animation
+                card.style.transition = 'opacity 0.3s, transform 0.3s';
+                card.style.opacity = '0';
+                card.style.transform = 'scale(0.9)';
+                
+                setTimeout(() => {
+                    card.remove();
+                    updatePendingCount(-1);
+                    if (action === 'accept') {
+                        updateAcceptedCount(1);
+                    } else {
+                        updateRejectedCount(1);
+                    }
+                    
+                    // Check if grid is empty
+                    const grid = document.getElementById('feedbackGrid');
+                    if (grid && grid.children.length === 0) {
+                        document.getElementById('content').innerHTML = 
+                            `<div class="empty">No pending feedback to review! 🎉</div>`;
+                    }
+                }, 300);
+                
+                showToast(`Feedback ${action}ed successfully`, 'success');
+                
+            } catch (error) {
+                console.error(`Error ${action}ing feedback:`, error);
+                card.classList.remove('processing');
+                showToast(`Error: ${error.message}`, 'error');
+            }
+        }
+
+        function updatePendingCount(delta) {
+            const el = document.getElementById('pendingCount');
+            const current = parseInt(el.textContent) || 0;
+            el.textContent = Math.max(0, current + delta);
+        }
+
+        function updateAcceptedCount(delta) {
+            const el = document.getElementById('acceptedCount');
+            const current = parseInt(el.textContent) || 0;
+            el.textContent = current + delta;
+        }
+
+        function updateRejectedCount(delta) {
+            const el = document.getElementById('rejectedCount');
+            const current = parseInt(el.textContent) || 0;
+            el.textContent = current + delta;
+        }
+
+        function showToast(message, type) {
+            const toast = document.createElement('div');
+            toast.className = `toast ${type}`;
+            toast.textContent = message;
+            document.body.appendChild(toast);
+            
+            setTimeout(() => {
+                toast.style.opacity = '0';
+                setTimeout(() => toast.remove(), 300);
+            }, 2000);
+        }
+
+        // Load on page load
+        console.log('[FeedbackReview] Script loaded, apiBase:', apiBase);
+        document.addEventListener('DOMContentLoaded', function() {
+            console.log('[FeedbackReview] DOM ready, calling loadFeedback()');
+            loadFeedback();
+        });
+        
+        // Also try immediately in case DOM is already loaded
+        if (document.readyState !== 'loading') {
+            console.log('[FeedbackReview] DOM already ready, calling loadFeedback()');
+            loadFeedback();
+        }
+    </script>
+</body>
+</html>

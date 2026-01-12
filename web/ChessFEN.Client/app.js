@@ -385,26 +385,13 @@ function preprocessImage(ctx, width, height) {
 // ============================================
 
 async function loadModels() {
+    // Model selector UI has been removed - this function is kept for future use
+    // but doesn't populate any UI element
     try {
         const response = await fetch(`${CONFIG.API_BASE}/models`);
         if (response.ok) {
             const data = await response.json();
-            console.log('Models response:', data);
-            
-            // Handle both formats: { models: [...] } or direct array, and PascalCase
-            const models = data.models || data.Models || data;
-            
-            if (Array.isArray(models)) {
-                models.forEach(model => {
-                    const option = document.createElement('option');
-                    // Handle both camelCase and PascalCase
-                    const name = model.name || model.Name;
-                    const accuracy = model.accuracy || model.Accuracy || '';
-                    option.value = name;
-                    option.textContent = accuracy ? `${name} (${accuracy})` : name;
-                    elements.modelSelect.appendChild(option);
-                });
-            }
+            console.log('Models available:', data);
         }
     } catch (error) {
         console.warn('Could not load models:', error);

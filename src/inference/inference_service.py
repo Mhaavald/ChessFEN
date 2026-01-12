@@ -2383,6 +2383,63 @@ def list_feedback():
     return jsonify(get_pending_feedback())
 
 
+@app.route('/api/chess/feedback/stats', methods=['GET'])
+def feedback_stats():
+    """Get feedback statistics for admin dashboard."""
+    accepted_dir = FEEDBACK_DIR / "accepted"
+    rejected_dir = FEEDBACK_DIR / "rejected"
+    
+    pending = len(list(FEEDBACK_DIR.glob("*.json"))) if FEEDBACK_DIR.exists() else 0
+    accepted = len(list(accepted_dir.glob("*.json"))) if accepted_dir.exists() else 0
+    rejected = len(list(rejected_dir.glob("*.json"))) if rejected_dir.exists() else 0
+    
+    return jsonify({
+        "pending": pending,
+        "accepted": accepted,
+        "rejected": rejected,
+        "total": pending + accepted + rejected
+    })
+
+
+@app.route('/api/chess/feedback/<feedback_id>/accept', methods=['POST'])
+def accept_feedback(feedback_id):
+    """Accept a feedback item and move to accepted folder."""
+    return _process_feedback_action(feedback_id, "accepted")
+
+
+@app.route('/api/chess/feedback/<feedback_id>/reject', methods=['POST'])
+def reject_feedback(feedback_id):
+    """Reject a feedback item and move to rejected folder."""
+    return _process_feedback_action(feedback_id, "rejected")
+
+
+def _process_feedback_action(feedback_id: str, action: str):
+    """Move feedback files to accepted or rejected folder."""
+    import shutil
+    
+    json_file = FEEDBACK_DIR / f"{feedback_id}.json"
+    img_file = FEEDBACK_DIR / f"{feedback_id}.png"
+    
+    if not json_file.exists():
+        return jsonify({"error": f"Feedback {feedback_id} not found"}), 404
+    
+    # Create target directory
+    target_dir = FEEDBACK_DIR / action
+    target_dir.mkdir(parents=True, exist_ok=True)
+    
+    # Move files
+    try:
+        shutil.move(str(json_file), str(target_dir / json_file.name))
+        if img_file.exists():
+            shutil.move(str(img_file), str(target_dir / img_file.name))
+        
+        print(f"[FEEDBACK] {action.upper()} feedback {feedback_id}")
+        return jsonify({"success": True, "action": action, "feedback_id": feedback_id})
+    except Exception as e:
+        print(f"[FEEDBACK] Error processing {feedback_id}: {e}")
+        return jsonify({"error": str(e)}), 500
+
+
 def get_user_statistics():
     """Calculate user statistics from feedback data and prediction logs."""
     # Count predictions and valid FENs from log files
