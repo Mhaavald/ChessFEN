@@ -451,6 +451,9 @@
                     <div class="value" id="rejectedCount">-</div>
                     <div class="label">Rejected</div>
                 </div>
+                <div class="header-stat">
+                    <button class="btn btn-danger" onclick="clearAllFeedback()" title="Delete all pending feedback">🗑️ Clear All</button>
+                </div>
             </div>
         </div>
 
@@ -808,6 +811,39 @@
 
         async function rejectFeedback(feedbackId) {
             await processFeedback(feedbackId, 'reject');
+        }
+
+        async function clearAllFeedback() {
+            const pendingCount = parseInt(document.getElementById('pendingCount').textContent) || 0;
+            if (pendingCount === 0) {
+                showToast('No pending feedback to clear', 'info');
+                return;
+            }
+            
+            if (!confirm(`Are you sure you want to delete all ${pendingCount} pending feedback items? This cannot be undone.`)) {
+                return;
+            }
+            
+            try {
+                const response = await fetch(`${apiBase}/feedback/clear`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' }
+                });
+                
+                if (!response.ok) {
+                    throw new Error(`HTTP ${response.status}`);
+                }
+                
+                const result = await response.json();
+                showToast(`Deleted ${result.deleted} feedback items`, 'success');
+                
+                // Reload the page to refresh the list
+                await loadFeedback();
+                
+            } catch (error) {
+                console.error('Error clearing feedback:', error);
+                showToast(`Error: ${error.message}`, 'error');
+            }
         }
 
         async function processFeedback(feedbackId, action) {

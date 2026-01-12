@@ -1172,10 +1172,10 @@ async function submitCorrections() {
         console.log('Sending feedback with', state.warpedImageBase64 ? 'warped image' : 'original image');
 
         const payload = {
-            originalFen: state.originalFen,
-            correctedFen: state.resultFen,
+            original_fen: state.originalFen,
+            corrected_fen: state.resultFen,
             image: imageToSend,
-            correctedSquares: correctedSquares
+            corrected_squares: correctedSquares
         };
 
         console.log('Submitting corrections to:', `${CONFIG.API_BASE}/feedback`);

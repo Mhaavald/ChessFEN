@@ -2413,6 +2413,25 @@ def reject_feedback(feedback_id):
     return _process_feedback_action(feedback_id, "rejected")
 
 
+@app.route('/api/chess/feedback/clear', methods=['POST'])
+def clear_feedback():
+    """Delete all pending feedback files."""
+    try:
+        deleted_count = 0
+        if FEEDBACK_DIR.exists():
+            for f in FEEDBACK_DIR.glob("*.json"):
+                f.unlink()
+                deleted_count += 1
+            for f in FEEDBACK_DIR.glob("*.png"):
+                f.unlink()
+        
+        print(f"[FEEDBACK] Cleared {deleted_count} feedback items")
+        return jsonify({"success": True, "deleted": deleted_count})
+    except Exception as e:
+        print(f"[FEEDBACK] Error clearing feedback: {e}")
+        return jsonify({"error": str(e)}), 500
+
+
 def _process_feedback_action(feedback_id: str, action: str):
     """Move feedback files to accepted or rejected folder."""
     import shutil

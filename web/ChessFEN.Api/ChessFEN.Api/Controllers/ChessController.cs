@@ -522,6 +522,36 @@ public class ChessController : ControllerBase
         return await ProcessFeedbackAction(feedbackId, "reject");
     }
 
+    /// <summary>
+    /// Clear all pending feedback (admin endpoint)
+    /// </summary>
+    [HttpPost("feedback/clear")]
+    public async Task<ActionResult<object>> ClearFeedback()
+    {
+        // Check admin authorization
+        var authResult = CheckAuthorization(requireAdmin: true);
+        if (authResult != null) return authResult;
+
+        try
+        {
+            var client = _httpClientFactory.CreateClient("InferenceService");
+            var response = await client.PostAsync("/api/chess/feedback/clear", null);
+            var json = await response.Content.ReadAsStringAsync();
+            
+            if (!response.IsSuccessStatusCode)
+            {
+                return StatusCode((int)response.StatusCode, json);
+            }
+            
+            return Content(json, "application/json");
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Error clearing feedback");
+            return StatusCode(500, new { error = ex.Message });
+        }
+    }
+
     private async Task<ActionResult<object>> ProcessFeedbackAction(string feedbackId, string action)
     {
         // Check admin authorization
