@@ -40,7 +40,43 @@ document.addEventListener('DOMContentLoaded', () => {
     cacheElements();
     bindEvents();
     loadModels();
+    checkAuthStatus();
 });
+
+// Check if user is authenticated (Azure Easy Auth)
+async function checkAuthStatus() {
+    try {
+        // Azure Container Apps Easy Auth provides /.auth/me endpoint
+        const controller = new AbortController();
+        const timeout = setTimeout(() => controller.abort(), 5000);
+        
+        const response = await fetch('/.auth/me', { 
+            signal: controller.signal,
+            credentials: 'include'
+        });
+        clearTimeout(timeout);
+        
+        if (response.ok) {
+            const authData = await response.json();
+            if (authData && authData.length > 0 && authData[0].user_id) {
+                console.log('Authenticated as:', authData[0].user_id);
+                return true;
+            }
+        }
+        
+        // Not authenticated or session expired
+        console.log('Not authenticated or session expired');
+        return false;
+    } catch (error) {
+        // On localhost, /.auth/me won't exist - that's fine
+        if (window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1') {
+            console.log('Local dev mode - skipping auth check');
+            return true;
+        }
+        console.warn('Auth check failed:', error.message);
+        return false;
+    }
+}
 
 function cacheElements() {
     elements.fileInput = document.getElementById('fileInput');
@@ -60,7 +96,6 @@ function cacheElements() {
     elements.fenHint = document.getElementById('fenHint');
     elements.analyzeWhiteBtn = document.getElementById('analyzeWhiteBtn');
     elements.analyzeBlackBtn = document.getElementById('analyzeBlackBtn');
-    elements.newScanBtn = document.getElementById('newScanBtn');
     elements.retryBtn = document.getElementById('retryBtn');
     
     elements.cameraModal = document.getElementById('cameraModal');
@@ -91,8 +126,12 @@ function cacheElements() {
     elements.whiteGameIcon = document.getElementById('whiteGameIcon');
     elements.blackGameIcon = document.getElementById('blackGameIcon');
     
-    // Lichess element
-    elements.playLichessBtn = document.getElementById('playLichessBtn');
+    // Lichess elements
+    elements.lichessWhiteBtn = document.getElementById('lichessWhiteBtn');
+    elements.lichessBlackBtn = document.getElementById('lichessBlackBtn');
+    
+    // Flip button
+    elements.flipBoardBtn = document.getElementById('flipBoardBtn');
 }
 
 function bindEvents() {
@@ -106,13 +145,13 @@ function bindEvents() {
     elements.captureBtn.addEventListener('click', captureFrame);
 
     // Actions
-    elements.newScanBtn.addEventListener('click', resetToInput);
     elements.retryBtn.addEventListener('click', resetToInput);
     
     // Board editing
     elements.editBoardBtn.addEventListener('click', enterEditMode);
     elements.doneEditingBtn.addEventListener('click', exitEditMode);
     elements.resetBoardBtn.addEventListener('click', resetBoard);
+    elements.flipBoardBtn.addEventListener('click', flipBoard);
     
     // Check for games
     // Game check is now automatic - no button event needed
@@ -252,6 +291,56 @@ function updateCameraStatus(message, type) {
 }
 
 // ============================================
+// API Fetch with Timeout and Auth Handling
+// ============================================
+
+async function fetchWithAuth(url, options = {}, timeoutMs = 30000) {
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), timeoutMs);
+    
+    try {
+        const response = await fetch(url, {
+            ...options,
+            signal: controller.signal,
+            credentials: 'include'
+        });
+        clearTimeout(timeout);
+        
+        // Check for auth errors
+        if (response.status === 401 || response.status === 403) {
+            const isAuth = await checkAuthStatus();
+            if (!isAuth) {
+                // Session expired - redirect to login
+                showAuthExpiredError();
+                throw new Error('Session expired. Please log in again.');
+            }
+        }
+        
+        return response;
+    } catch (error) {
+        clearTimeout(timeout);
+        if (error.name === 'AbortError') {
+            // Check if it's an auth issue causing the hang
+            const isAuth = await checkAuthStatus();
+            if (!isAuth) {
+                showAuthExpiredError();
+                throw new Error('Session expired. Please log in again.');
+            }
+            throw new Error('Request timed out. Please try again.');
+        }
+        throw error;
+    }
+}
+
+function showAuthExpiredError() {
+    const errorMsg = 'Your session has expired. Click OK to log in again.';
+    if (confirm(errorMsg)) {
+        // Redirect to login - Azure Easy Auth handles this
+        window.location.href = '/.auth/login/aad?post_login_redirect_uri=' + encodeURIComponent(window.location.pathname);
+    }
+}
+
+// ============================================
 // Image Preprocessing
 // ============================================
 
@@ -340,11 +429,11 @@ async function analyzeBoard() {
         const url = `${CONFIG.API_BASE}/predict${query}`;
         console.log('Calling API:', url);
         
-        const response = await fetch(url, {
+        const response = await fetchWithAuth(url, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ image: state.imageBase64 })
-        });
+        }, 60000);  // 60 second timeout for prediction
         
         console.log('Response status:', response.status);
         
@@ -578,8 +667,9 @@ async function displayResults() {
     elements.analyzeWhiteBtn.href = `${CONFIG.CHESS_COM_ANALYSIS_URL}?fen=${encodeURIComponent(whiteFen)}&flip=false&tab=analysis`;
     elements.analyzeBlackBtn.href = `${CONFIG.CHESS_COM_ANALYSIS_URL}?fen=${encodeURIComponent(blackFen)}&flip=true&tab=analysis`;
     
-    // Set Lichess link (uses white to move by default, user can change in Lichess editor)
-    elements.playLichessBtn.href = `https://lichess.org/editor/${whiteFen.replace(/ /g, '_')}`;
+    // Set Lichess links
+    elements.lichessWhiteBtn.href = `https://lichess.org/editor/${whiteFen.replace(/ /g, '_')}`;
+    elements.lichessBlackBtn.href = `https://lichess.org/editor/${blackFen.replace(/ /g, '_')}`;
     
     // Auto-check for games
     checkForGames();
@@ -948,7 +1038,8 @@ function handleSquareClick(row, col) {
     const blackFen = `${state.resultFen} b ${castling} - 0 1`;
     elements.analyzeWhiteBtn.href = `${CONFIG.CHESS_COM_ANALYSIS_URL}?fen=${encodeURIComponent(whiteFen)}&flip=false&tab=analysis`;
     elements.analyzeBlackBtn.href = `${CONFIG.CHESS_COM_ANALYSIS_URL}?fen=${encodeURIComponent(blackFen)}&flip=true&tab=analysis`;
-    elements.playLichessBtn.href = `https://lichess.org/editor/${whiteFen.replace(/ /g, '_')}`;
+    elements.lichessWhiteBtn.href = `https://lichess.org/editor/${whiteFen.replace(/ /g, '_')}`;
+    elements.lichessBlackBtn.href = `https://lichess.org/editor/${blackFen.replace(/ /g, '_')}`;
     
     // Re-render board only
     renderBoard();
@@ -985,9 +1076,54 @@ async function resetBoard() {
     const blackFen = `${state.resultFen} b ${castling} - 0 1`;
     elements.analyzeWhiteBtn.href = `${CONFIG.CHESS_COM_ANALYSIS_URL}?fen=${encodeURIComponent(whiteFen)}&flip=false&tab=analysis`;
     elements.analyzeBlackBtn.href = `${CONFIG.CHESS_COM_ANALYSIS_URL}?fen=${encodeURIComponent(blackFen)}&flip=true&tab=analysis`;
-    elements.playLichessBtn.href = `https://lichess.org/editor/${whiteFen.replace(/ /g, '_')}`;
+    elements.lichessWhiteBtn.href = `https://lichess.org/editor/${whiteFen.replace(/ /g, '_')}`;
+    elements.lichessBlackBtn.href = `https://lichess.org/editor/${blackFen.replace(/ /g, '_')}`;
 
     showToast('Board reset to original');
+}
+
+function flipBoard() {
+    // Flip the board 180 degrees - for diagrams shown from black's perspective
+    // This rotates the entire position so white pieces are at the bottom
+    
+    const newBoard = [];
+    for (let row = 0; row < 8; row++) {
+        newBoard[row] = [];
+        for (let col = 0; col < 8; col++) {
+            // Map from (row, col) to (7-row, 7-col)
+            newBoard[row][col] = state.board[7 - row][7 - col];
+        }
+    }
+    
+    state.board = newBoard;
+    state.resultFen = boardToFen(state.board);
+    state.corrections = {};
+    
+    // Re-render board
+    renderBoard();
+
+    // Update validation status
+    const validation = validateFen(state.resultFen);
+    if (validation.isValid) {
+        elements.fenStatus.textContent = '✓ Valid position';
+        elements.fenStatus.className = 'fen-status valid';
+        elements.fenHint.hidden = true;
+    } else {
+        elements.fenStatus.textContent = `⚠ ${validation.issues[0] || 'Invalid position'}`;
+        elements.fenStatus.className = 'fen-status invalid';
+        elements.fenHint.hidden = false;
+    }
+
+    // Update links
+    const castling = inferCastlingRights();
+    const whiteFen = `${state.resultFen} w ${castling} - 0 1`;
+    const blackFen = `${state.resultFen} b ${castling} - 0 1`;
+    elements.analyzeWhiteBtn.href = `${CONFIG.CHESS_COM_ANALYSIS_URL}?fen=${encodeURIComponent(whiteFen)}&flip=false&tab=analysis`;
+    elements.analyzeBlackBtn.href = `${CONFIG.CHESS_COM_ANALYSIS_URL}?fen=${encodeURIComponent(blackFen)}&flip=true&tab=analysis`;
+    elements.lichessWhiteBtn.href = `https://lichess.org/editor/${whiteFen.replace(/ /g, '_')}`;
+    elements.lichessBlackBtn.href = `https://lichess.org/editor/${blackFen.replace(/ /g, '_')}`;
+
+    showToast('Board flipped 180°');
 }
 
 function boardToFen(board) {

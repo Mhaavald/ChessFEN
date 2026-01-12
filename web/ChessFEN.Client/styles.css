@@ -1200,10 +1200,11 @@ body {
     background: linear-gradient(135deg, #629924, #4a7a1c);
     color: white;
     font-weight: 600;
-    padding: 12px 24px;
+    padding: 6px 10px;
+    font-size: 0.85rem;
     border-radius: var(--radius);
     transition: all 0.2s;
-    width: 100%;
+    flex: 1;
 }
 
 .btn-lichess:hover {
@@ -1244,21 +1245,6 @@ body {
     .captured-board-reference .captured-board-image {
         width: 384px;
         height: 384px;
-    }
-    
-    .lichess-options {
-        flex-direction: row;
-        flex-wrap: wrap;
-        justify-content: center;
-    }
-    
-    .lichess-options .option-row {
-        flex: 0 0 auto;
-    }
-    
-    .btn-lichess {
-        width: auto;
-        min-width: 200px;
     }
 }
 

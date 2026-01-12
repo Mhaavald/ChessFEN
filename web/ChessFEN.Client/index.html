@@ -5,7 +5,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
     <title>Chess FEN Scanner</title>
     <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>♔</text></svg>">
-    <link rel="stylesheet" href="styles.css?v=22">
+    <link rel="stylesheet" href="styles.css?v=26">
 </head>
 <body>
     <div class="app">
@@ -107,6 +107,7 @@
 
                     <!-- Edit Actions -->
                     <div class="edit-actions">
+                        <button class="btn btn-sm btn-outline" id="flipBoardBtn" title="Flip board 180° (for diagrams shown from black's perspective)">🔄 Flip</button>
                         <button class="btn btn-sm btn-outline" id="resetBoardBtn" title="Reset to original">↩️ Reset</button>
                         <button class="btn btn-sm btn-primary" id="doneEditingBtn">✓ Done</button>
                     </div>
@@ -129,8 +130,11 @@
                 <div class="search-section">
                     <h3>♞ Lichess: Play vs Computer</h3>
                     <div class="search-buttons">
-                        <a class="btn btn-lichess" id="playLichessBtn" target="_blank">
-                            Open in Lichess
+                        <a class="btn btn-lichess" id="lichessWhiteBtn" target="_blank">
+                            ⬜ Play as White
+                        </a>
+                        <a class="btn btn-lichess" id="lichessBlackBtn" target="_blank">
+                            ⬛ Play as Black
                         </a>
                     </div>
                 </div>
@@ -138,6 +142,7 @@
                 <!-- Chess.com Search -->
                 <div class="search-section" id="findGamesSection">
                     <h3>🔍 Find Games on Chess.com</h3>
+                    <small class="help-text">Search for master games with this position</small>
                     <div class="games-check-row">
                         <button class="btn btn-primary" id="checkGamesBtn">🔍 Search</button>
                         <div class="games-check-status" id="gamesCheckStatus" hidden>
@@ -157,13 +162,6 @@
                             <span>No games found</span>
                         </div>
                     </div>
-                </div>
-
-                <!-- Actions -->
-                <div class="result-actions">
-                    <button class="btn btn-secondary" id="newScanBtn">
-                        🔄 New Scan
-                    </button>
                 </div>
             </section>
 
@@ -229,6 +227,6 @@
     </div>
 
     <script src="config.js?v=18"></script>
-    <script src="app.js?v=22"></script>
+    <script src="app.js?v=26"></script>
 </body>
 </html>
