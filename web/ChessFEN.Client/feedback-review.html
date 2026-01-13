@@ -412,6 +412,122 @@
             color: #888;
         }
 
+        /* Overlay and tile viewer styles */
+        .image-row {
+            display: flex;
+            gap: 0.5rem;
+            margin-bottom: 0.75rem;
+            justify-content: center;
+        }
+
+        .image-thumbnail {
+            width: 128px;
+            height: 128px;
+            object-fit: contain;
+            border-radius: 4px;
+            cursor: pointer;
+            transition: transform 0.2s;
+            border: 2px solid transparent;
+        }
+
+        .image-thumbnail:hover {
+            transform: scale(1.05);
+            border-color: #4ecdc4;
+        }
+
+        .image-label {
+            font-size: 0.7rem;
+            color: #888;
+            text-align: center;
+            margin-top: 0.25rem;
+        }
+
+        .tile-viewer {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 0.5rem;
+            margin-top: 0.75rem;
+            padding-top: 0.75rem;
+            border-top: 1px solid rgba(255, 255, 255, 0.1);
+        }
+
+        .tile-item {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            background: rgba(0, 0, 0, 0.3);
+            padding: 0.5rem;
+            border-radius: 0.5rem;
+        }
+
+        .tile-image {
+            width: 64px;
+            height: 64px;
+            border-radius: 4px;
+            image-rendering: pixelated;
+        }
+
+        .tile-info {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            margin-top: 0.25rem;
+            font-size: 0.75rem;
+        }
+
+        .tile-square {
+            font-family: monospace;
+            color: #4ecdc4;
+            font-weight: bold;
+        }
+
+        .tile-confidence {
+            font-size: 0.7rem;
+            padding: 2px 6px;
+            border-radius: 3px;
+            margin-top: 2px;
+        }
+
+        .tile-confidence.high {
+            background: rgba(78, 205, 196, 0.3);
+            color: #4ecdc4;
+        }
+
+        .tile-confidence.medium {
+            background: rgba(255, 193, 7, 0.3);
+            color: #ffc107;
+        }
+
+        .tile-confidence.low {
+            background: rgba(255, 107, 107, 0.3);
+            color: #ff6b6b;
+        }
+
+        /* Modal for enlarged images */
+        .image-modal {
+            display: none;
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background: rgba(0, 0, 0, 0.9);
+            z-index: 2000;
+            justify-content: center;
+            align-items: center;
+            cursor: pointer;
+        }
+
+        .image-modal.active {
+            display: flex;
+        }
+
+        .image-modal img {
+            max-width: 90%;
+            max-height: 90%;
+            border-radius: 8px;
+        }
+
         @media (max-width: 600px) {
             .feedback-grid {
                 grid-template-columns: 1fr;
@@ -493,6 +609,11 @@
         <div id="content">
             <div class="loading">Loading feedback...</div>
         </div>
+    </div>
+
+    <!-- Modal for enlarged images -->
+    <div id="imageModal" class="image-modal" onclick="closeImageModal()">
+        <img id="modalImage" src="" alt="Enlarged view">
     </div>
 
     <script src="config.js"></script>
@@ -683,36 +804,80 @@
             const card = document.createElement('div');
             card.className = 'feedback-card';
             card.id = `card-${item.id}`;
-            
+
             const timestamp = item.timestamp ? new Date(item.timestamp).toLocaleString() : 'Unknown';
             const corrections = item.corrected_squares || {};
+            const tileConfidences = item.tile_confidences || {};
             const correctionCount = Object.keys(corrections).length;
-            
+
             // Parse FEN to board (handles null/empty gracefully)
             const board = fenToBoard(item.corrected_fen);
-            
-            // Build corrections HTML with from/to info
+
+            // Build corrections HTML with from/to info and confidence
             const correctionsHtml = Object.entries(corrections).map(([square, toPiece]) => {
                 const fromPiece = getPieceAtSquare(item.original_fen, square);
                 const fromClass = fromPiece.startsWith('w') ? 'piece-white' : (fromPiece.startsWith('b') ? 'piece-black' : '');
                 const toClass = toPiece.startsWith('w') ? 'piece-white' : (toPiece.startsWith('b') ? 'piece-black' : '');
+                const confidence = tileConfidences[square];
+                const confDisplay = confidence !== undefined ? `${(confidence * 100).toFixed(0)}%` : '?';
+                const confClass = confidence !== undefined ? getConfidenceClass(confidence) : '';
                 return `
                     <div class="correction-item">
                         <span class="correction-square">${square}:</span>
                         <span class="${fromClass}" style="font-size: 1.2rem;">${PIECE_UNICODE[fromPiece] || '·'}</span>
                         <span class="correction-arrow">→</span>
                         <span class="${toClass}" style="font-size: 1.2rem;">${PIECE_UNICODE[toPiece] || toPiece}</span>
-                        <span style="color: #888; font-size: 0.7rem;">(${fromPiece} → ${toPiece})</span>
+                        <span class="tile-confidence ${confClass}">${confDisplay}</span>
                     </div>
                 `;
             }).join('');
-            
+
+            // Build tile viewer HTML for corrected squares
+            const tileViewerHtml = Object.entries(corrections).map(([square, toPiece]) => {
+                const fromPiece = getPieceAtSquare(item.original_fen, square);
+                const confidence = tileConfidences[square];
+                const confDisplay = confidence !== undefined ? `${(confidence * 100).toFixed(0)}%` : '?';
+                const confClass = confidence !== undefined ? getConfidenceClass(confidence) : '';
+                return `
+                    <div class="tile-item">
+                        <img class="tile-image"
+                             src="${apiBase}/feedback/${item.id}/tile/${square}"
+                             alt="Tile ${square}"
+                             onclick="openImageModal(this.src)"
+                             onerror="this.style.display='none'">
+                        <div class="tile-info">
+                            <span class="tile-square">${square}</span>
+                            <span class="tile-confidence ${confClass}">${confDisplay}</span>
+                            <span style="font-size: 0.65rem; color: #888;">${fromPiece} → ${toPiece}</span>
+                        </div>
+                    </div>
+                `;
+            }).join('');
+
             card.innerHTML = `
                 <div class="card-header">
                     <span class="feedback-id">#${item.id}</span>
                     <span class="timestamp">${timestamp}</span>
                 </div>
                 <div class="board-container">
+                    <div class="image-row">
+                        <div>
+                            <img class="image-thumbnail"
+                                 src="${apiBase}/feedback/${item.id}/image"
+                                 alt="Warped board"
+                                 onclick="openImageModal(this.src)"
+                                 onerror="this.style.display='none'">
+                            <div class="image-label">Warped</div>
+                        </div>
+                        <div>
+                            <img class="image-thumbnail"
+                                 src="${apiBase}/feedback/${item.id}/overlay"
+                                 alt="Overlay with predictions"
+                                 onclick="openImageModal(this.src)"
+                                 onerror="this.style.display='none'">
+                            <div class="image-label">Predictions</div>
+                        </div>
+                    </div>
                     <div class="board-wrapper">
                         ${renderBoard(board, corrections)}
                     </div>
@@ -731,6 +896,9 @@
                             <div class="corrections-title">Corrections (${correctionCount}):</div>
                             ${correctionsHtml}
                         </div>
+                        <div class="tile-viewer">
+                            ${tileViewerHtml}
+                        </div>
                     ` : ''}
                 </div>
                 <div class="card-actions">
@@ -742,8 +910,26 @@
                     </button>
                 </div>
             `;
-            
+
             return card;
+        }
+
+        function getConfidenceClass(confidence) {
+            if (confidence >= 0.9) return 'high';
+            if (confidence >= 0.7) return 'medium';
+            return 'low';
+        }
+
+        function openImageModal(src) {
+            const modal = document.getElementById('imageModal');
+            const img = document.getElementById('modalImage');
+            img.src = src;
+            modal.classList.add('active');
+        }
+
+        function closeImageModal() {
+            const modal = document.getElementById('imageModal');
+            modal.classList.remove('active');
         }
 
         function fenToBoard(fen) {

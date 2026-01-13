@@ -2036,7 +2036,8 @@ def log_prediction(user_id: str = None, user_email: str = None, fen: str = None,
 
 def save_feedback(original_fen: str, corrected_fen: str, image_base64: str,
                   corrected_squares: dict, model_name: str,
-                  user_id: str = None, user_email: str = None):
+                  user_id: str = None, user_email: str = None,
+                  overlay_image_base64: str = None, tile_confidences: dict = None):
     """Save user correction feedback for later retraining."""
     FEEDBACK_DIR.mkdir(parents=True, exist_ok=True)
 
@@ -2050,6 +2051,7 @@ def save_feedback(original_fen: str, corrected_fen: str, image_base64: str,
         "original_fen": original_fen,
         "corrected_fen": corrected_fen,
         "corrected_squares": corrected_squares,  # e.g., {"a1": "wR", "b2": "empty"}
+        "tile_confidences": tile_confidences or {},  # e.g., {"a1": 0.85, "b2": 0.42}
         "user_id": user_id,
         "user_email": user_email,
     }
@@ -2059,12 +2061,19 @@ def save_feedback(original_fen: str, corrected_fen: str, image_base64: str,
     with open(feedback_file, 'w') as f:
         json.dump(feedback, f, indent=2)
 
-    # Save original image
+    # Save warped board image
     if image_base64:
         img_data = base64.b64decode(image_base64)
         img_file = FEEDBACK_DIR / f"{feedback_id}.png"
         with open(img_file, 'wb') as f:
             f.write(img_data)
+
+    # Save overlay image (with predictions drawn on it)
+    if overlay_image_base64:
+        overlay_data = base64.b64decode(overlay_image_base64)
+        overlay_file = FEEDBACK_DIR / f"{feedback_id}_overlay.png"
+        with open(overlay_file, 'wb') as f:
+            f.write(overlay_data)
 
     print(f"[FEEDBACK] Saved feedback {feedback_id} from user: {user_email} ({user_id})")
 
@@ -2352,8 +2361,10 @@ def submit_feedback():
     Request:
         - original_fen: string
         - corrected_fen: string
-        - image: base64 encoded image
+        - image: base64 encoded warped board image
+        - overlay_image: base64 encoded overlay image with predictions
         - corrected_squares: dict of {square: piece} corrections
+        - tile_confidences: dict of {square: confidence} for corrected squares
         - user_id: string (from Azure AD)
         - user_email: string (from Azure AD)
     """
@@ -2371,9 +2382,11 @@ def submit_feedback():
         corrected_squares=data.get('corrected_squares', {}),
         model_name=_current_model_name,
         user_id=user_id,
-        user_email=user_email
+        user_email=user_email,
+        overlay_image_base64=data.get('overlay_image'),
+        tile_confidences=data.get('tile_confidences', {})
     )
-    
+
     return jsonify({"success": True, "feedback_id": feedback_id})
 
 
@@ -2435,27 +2448,88 @@ def clear_feedback():
 def _process_feedback_action(feedback_id: str, action: str):
     """Move feedback files to accepted or rejected folder."""
     import shutil
-    
+
     json_file = FEEDBACK_DIR / f"{feedback_id}.json"
     img_file = FEEDBACK_DIR / f"{feedback_id}.png"
-    
+    overlay_file = FEEDBACK_DIR / f"{feedback_id}_overlay.png"
+
     if not json_file.exists():
         return jsonify({"error": f"Feedback {feedback_id} not found"}), 404
-    
+
     # Create target directory
     target_dir = FEEDBACK_DIR / action
     target_dir.mkdir(parents=True, exist_ok=True)
-    
+
     # Move files
     try:
         shutil.move(str(json_file), str(target_dir / json_file.name))
         if img_file.exists():
             shutil.move(str(img_file), str(target_dir / img_file.name))
-        
+        if overlay_file.exists():
+            shutil.move(str(overlay_file), str(target_dir / overlay_file.name))
+
         print(f"[FEEDBACK] {action.upper()} feedback {feedback_id}")
         return jsonify({"success": True, "action": action, "feedback_id": feedback_id})
     except Exception as e:
         print(f"[FEEDBACK] Error processing {feedback_id}: {e}")
+        return jsonify({"error": str(e)}), 500
+
+
+@app.route('/api/chess/feedback/<feedback_id>/image', methods=['GET'])
+def get_feedback_image(feedback_id):
+    """Get the warped board image for a feedback item."""
+    img_file = FEEDBACK_DIR / f"{feedback_id}.png"
+    if not img_file.exists():
+        return jsonify({"error": "Image not found"}), 404
+    return send_file(img_file, mimetype='image/png')
+
+
+@app.route('/api/chess/feedback/<feedback_id>/overlay', methods=['GET'])
+def get_feedback_overlay(feedback_id):
+    """Get the overlay image (with predictions) for a feedback item."""
+    overlay_file = FEEDBACK_DIR / f"{feedback_id}_overlay.png"
+    if not overlay_file.exists():
+        return jsonify({"error": "Overlay image not found"}), 404
+    return send_file(overlay_file, mimetype='image/png')
+
+
+@app.route('/api/chess/feedback/<feedback_id>/tile/<square>', methods=['GET'])
+def get_feedback_tile(feedback_id, square):
+    """Extract and return a specific tile from the feedback warped image.
+
+    Square format: a1-h8 (chess notation)
+    Returns a 64x64 PNG image of the requested tile.
+    """
+    img_file = FEEDBACK_DIR / f"{feedback_id}.png"
+    if not img_file.exists():
+        return jsonify({"error": "Image not found"}), 404
+
+    # Parse square notation (a1 = bottom-left, h8 = top-right from white's view)
+    if len(square) != 2 or square[0] not in 'abcdefgh' or square[1] not in '12345678':
+        return jsonify({"error": "Invalid square notation"}), 400
+
+    col = ord(square[0]) - ord('a')  # 0-7
+    row = 8 - int(square[1])          # 0-7 (rank 8 = row 0)
+
+    # Load image and extract tile
+    try:
+        img = cv2.imread(str(img_file))
+        if img is None:
+            return jsonify({"error": "Could not read image"}), 500
+
+        # Assume image is WARP_SIZE x WARP_SIZE (512x512), tiles are 64x64
+        tile_size = img.shape[0] // 8
+        x = col * tile_size
+        y = row * tile_size
+        tile = img[y:y+tile_size, x:x+tile_size]
+
+        # Convert to PNG
+        _, buffer = cv2.imencode('.png', tile)
+        return send_file(
+            BytesIO(buffer.tobytes()),
+            mimetype='image/png'
+        )
+    except Exception as e:
         return jsonify({"error": str(e)}), 500
 
 

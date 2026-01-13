@@ -21,6 +21,7 @@ const CONFIG = {
 const state = {
     imageBase64: null,
     warpedImageBase64: null,  // Warped board image for feedback
+    overlayImageBase64: null, // Overlay image showing predictions for feedback review
     resultFen: null,
     originalFen: null,
     board: null,
@@ -49,13 +50,13 @@ async function checkAuthStatus() {
         // Azure Container Apps Easy Auth provides /.auth/me endpoint
         const controller = new AbortController();
         const timeout = setTimeout(() => controller.abort(), 5000);
-        
-        const response = await fetch('/.auth/me', { 
+
+        const response = await fetch('/.auth/me', {
             signal: controller.signal,
             credentials: 'include'
         });
         clearTimeout(timeout);
-        
+
         if (response.ok) {
             const authData = await response.json();
             if (authData && authData.length > 0 && authData[0].user_id) {
@@ -63,7 +64,7 @@ async function checkAuthStatus() {
                 return true;
             }
         }
-        
+
         // Not authenticated or session expired
         console.log('Not authenticated or session expired');
         return false;
@@ -453,13 +454,20 @@ async function analyzeBoard() {
             // Store questionable squares (e.g., potential queen color confusion)
             state.questionableSquares = result.questionable_squares || result.questionableSquares || null;
             
-            // Store warped image for feedback (if available from debug response)
+            // Store debug images for feedback (if available from debug response)
             const debugImages = result.debug_images || result.debugImages;
-            if (debugImages && debugImages.warped) {
-                state.warpedImageBase64 = debugImages.warped;
-                console.log('Stored warped image for feedback');
+            if (debugImages) {
+                if (debugImages.warped) {
+                    state.warpedImageBase64 = debugImages.warped;
+                    console.log('Stored warped image for feedback');
+                }
+                if (debugImages.overlay) {
+                    state.overlayImageBase64 = debugImages.overlay;
+                    console.log('Stored overlay image for feedback');
+                }
             } else {
                 state.warpedImageBase64 = null;
+                state.overlayImageBase64 = null;
             }
             
             await displayResults();
@@ -1171,11 +1179,25 @@ async function submitCorrections() {
         const imageToSend = state.warpedImageBase64 || state.imageBase64 || null;
         console.log('Sending feedback with', state.warpedImageBase64 ? 'warped image' : 'original image');
 
+        // Build confidences for corrected squares only (to reduce payload size)
+        const correctedConfidences = {};
+        if (state.confidences) {
+            for (const [key, correction] of Object.entries(state.corrections)) {
+                const [row, col] = key.split(',').map(Number);
+                const confidence = state.confidences?.[row]?.[col];
+                if (confidence !== undefined) {
+                    correctedConfidences[correction.square] = confidence;
+                }
+            }
+        }
+
         const payload = {
             original_fen: state.originalFen,
             corrected_fen: state.resultFen,
             image: imageToSend,
-            corrected_squares: correctedSquares
+            overlay_image: state.overlayImageBase64 || null,
+            corrected_squares: correctedSquares,
+            tile_confidences: correctedConfidences
         };
 
         console.log('Submitting corrections to:', `${CONFIG.API_BASE}/feedback`);
