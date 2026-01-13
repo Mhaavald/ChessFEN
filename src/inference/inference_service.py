@@ -2084,13 +2084,23 @@ def get_pending_feedback():
     """Get list of pending feedback items for admin review."""
     if not FEEDBACK_DIR.exists():
         return []
-    
+
     items = []
     for json_file in FEEDBACK_DIR.glob("*.json"):
-        with open(json_file) as f:
-            items.append(json.load(f))
-    
-    return sorted(items, key=lambda x: x['timestamp'], reverse=True)
+        try:
+            with open(json_file) as f:
+                item = json.load(f)
+                items.append(item)
+        except (IOError, OSError, json.JSONDecodeError, KeyError) as e:
+            # Skip unreadable or malformed files, log and continue
+            print(f"[FEEDBACK] Warning: Could not read {json_file.name}: {e}")
+            continue
+
+    # Sort with fallback for missing timestamp
+    def get_timestamp(x):
+        return x.get('timestamp', '1970-01-01T00:00:00')
+
+    return sorted(items, key=get_timestamp, reverse=True)
 
 
 # ============================
