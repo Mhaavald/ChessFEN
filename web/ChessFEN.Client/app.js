@@ -30,7 +30,21 @@ const state = {
     cameraStream: null,
     facingMode: 'environment',
     editMode: false,
-    selectedPiece: 'empty'
+    selectedPiece: 'empty',
+    isScreenCapture: false,   // Track if we're in screen capture mode
+    // Selection rectangle state for screen capture crop
+    selection: {
+        active: false,
+        x: 0,
+        y: 0,
+        width: 0,
+        height: 0,
+        isDragging: false,
+        isResizing: false,
+        dragStartX: 0,
+        dragStartY: 0,
+        resizeHandle: null  // 'nw', 'ne', 'sw', 'se', 'n', 's', 'e', 'w'
+    }
 };
 
 // DOM Elements
@@ -42,6 +56,7 @@ document.addEventListener('DOMContentLoaded', () => {
     bindEvents();
     loadModels();
     checkAuthStatus();
+    initScreenCaptureButton();
 });
 
 // Check if user is authenticated (Azure Easy Auth)
@@ -82,6 +97,7 @@ async function checkAuthStatus() {
 function cacheElements() {
     elements.fileInput = document.getElementById('fileInput');
     elements.cameraBtn = document.getElementById('cameraBtn');
+    elements.screenCaptureBtn = document.getElementById('screenCaptureBtn');
     elements.optionsPanel = document.getElementById('optionsPanel');
     elements.skipDetection = document.getElementById('skipDetection');
 
@@ -105,6 +121,8 @@ function cacheElements() {
     elements.captureBtn = document.getElementById('captureBtn');
     elements.switchCameraBtn = document.getElementById('switchCameraBtn');
     elements.closeCameraBtn = document.getElementById('closeCameraBtn');
+    elements.selectionCanvas = document.getElementById('selectionCanvas');
+    elements.cameraGuide = document.getElementById('cameraGuide');
     
     elements.toast = document.getElementById('toast');
     
@@ -144,6 +162,11 @@ function bindEvents() {
     elements.closeCameraBtn.addEventListener('click', closeCamera);
     elements.switchCameraBtn.addEventListener('click', switchCamera);
     elements.captureBtn.addEventListener('click', captureFrame);
+
+    // Screen capture (only if supported)
+    if (elements.screenCaptureBtn) {
+        elements.screenCaptureBtn.addEventListener('click', openScreenCapture);
+    }
 
     // Actions
     elements.retryBtn.addEventListener('click', resetToInput);
@@ -240,6 +263,13 @@ function closeCamera() {
     }
     elements.cameraVideo.srcObject = null;
     elements.cameraModal.hidden = true;
+
+    // Reset screen capture state and show switch camera button again
+    if (state.isScreenCapture) {
+        hideSelectionCanvas();
+        state.isScreenCapture = false;
+        elements.switchCameraBtn.style.display = '';
+    }
 }
 
 async function switchCamera() {
@@ -255,29 +285,53 @@ function captureFrame() {
             alert('Camera not ready');
             return;
         }
-        
+
         updateCameraStatus('Capturing...', '');
-        
+
         const vw = video.videoWidth;
         const vh = video.videoHeight;
-        const size = Math.min(vw, vh) * 0.8;
-        const sx = (vw - size) / 2;
-        const sy = (vh - size) / 2;
-        
+
+        let sx, sy, sw, sh;
+
+        if (state.isScreenCapture && state.selection.active) {
+            // Use selection rectangle for screen capture
+            // Convert from canvas coordinates to video coordinates
+            const videoRect = elements.cameraVideo.getBoundingClientRect();
+
+            // Scale factors from display to actual video
+            const scaleX = vw / videoRect.width;
+            const scaleY = vh / videoRect.height;
+
+            sx = state.selection.x * scaleX;
+            sy = state.selection.y * scaleY;
+            sw = state.selection.width * scaleX;
+            sh = state.selection.height * scaleY;
+
+            console.log(`[CAPTURE] Selection: ${state.selection.x},${state.selection.y} ${state.selection.width}x${state.selection.height}`);
+            console.log(`[CAPTURE] Scaled to video: ${sx},${sy} ${sw}x${sh}`);
+        } else {
+            // Default: center 80% crop for camera mode
+            const size = Math.min(vw, vh) * 0.8;
+            sx = (vw - size) / 2;
+            sy = (vh - size) / 2;
+            sw = size;
+            sh = size;
+        }
+
         const canvas = document.createElement('canvas');
         canvas.width = CONFIG.CAPTURE_SIZE;
         canvas.height = CONFIG.CAPTURE_SIZE;
         const ctx = canvas.getContext('2d');
-        
+
         // Draw cropped region
-        ctx.drawImage(video, sx, sy, size, size, 0, 0, CONFIG.CAPTURE_SIZE, CONFIG.CAPTURE_SIZE);
-        
+        ctx.drawImage(video, sx, sy, sw, sh, 0, 0, CONFIG.CAPTURE_SIZE, CONFIG.CAPTURE_SIZE);
+
         // No client-side preprocessing - all preprocessing is done server-side for consistency
-        
+
         // Get base64 - use high quality JPEG (0.95)
         const base64 = canvas.toDataURL('image/jpeg', 0.95).split(',')[1];
         console.log(`[CAPTURE] Video: ${vw}x${vh}, Captured: ${CONFIG.CAPTURE_SIZE}x${CONFIG.CAPTURE_SIZE}`);
-        
+
         closeCamera();
         setImage(base64);
     } catch (error) {
@@ -289,6 +343,324 @@ function captureFrame() {
 function updateCameraStatus(message, type) {
     elements.cameraStatus.textContent = message;
     elements.cameraStatus.className = 'camera-status' + (type ? ' ' + type : '');
+}
+
+// ============================================
+// Screen Capture (PC Mode)
+// ============================================
+
+function isScreenCaptureSupported() {
+    // Check if getDisplayMedia is available and we're not on mobile
+    return navigator.mediaDevices &&
+           typeof navigator.mediaDevices.getDisplayMedia === 'function' &&
+           !/Android|iPhone|iPad|iPod/i.test(navigator.userAgent);
+}
+
+function initScreenCaptureButton() {
+    // Show screen capture button only on supported platforms
+    if (elements.screenCaptureBtn && isScreenCaptureSupported()) {
+        elements.screenCaptureBtn.style.display = '';
+    }
+}
+
+async function openScreenCapture() {
+    state.isScreenCapture = true;
+    elements.cameraModal.hidden = false;
+    elements.captureBtn.disabled = true;
+    elements.switchCameraBtn.style.display = 'none'; // Hide switch camera button
+    updateCameraStatus('Select a screen or window to capture...', '');
+
+    try {
+        const stream = await navigator.mediaDevices.getDisplayMedia({
+            video: { cursor: 'always' }
+        });
+
+        state.cameraStream = stream;
+        elements.cameraVideo.srcObject = stream;
+
+        // Handle user stopping share via browser UI
+        stream.getVideoTracks()[0].onended = () => {
+            closeCamera();
+        };
+
+        await new Promise((resolve, reject) => {
+            const timeout = setTimeout(() => reject(new Error('Video timeout')), 8000);
+            elements.cameraVideo.onloadedmetadata = () => {
+                clearTimeout(timeout);
+                elements.cameraVideo.play().then(resolve).catch(reject);
+            };
+        });
+
+        // Wait for video to stabilize
+        await new Promise(r => setTimeout(r, 300));
+
+        // Initialize selection canvas for screen capture
+        initSelectionCanvas();
+
+        elements.captureBtn.disabled = false;
+        updateCameraStatus('Drag to select the chess board area, then click Capture.', 'success');
+
+    } catch (error) {
+        console.error('Screen capture error:', error);
+        if (error.name === 'NotAllowedError') {
+            updateCameraStatus('Screen capture was cancelled.', '');
+            closeCamera();
+        } else {
+            updateCameraStatus(`Error: ${error.message}`, 'error');
+        }
+    }
+}
+
+// ============================================
+// Selection Canvas for Screen Capture Cropping
+// ============================================
+
+function initSelectionCanvas() {
+    const canvas = elements.selectionCanvas;
+    const video = elements.cameraVideo;
+
+    if (!canvas || !video) return;
+
+    // Hide the camera guide in screen capture mode
+    if (elements.cameraGuide) {
+        elements.cameraGuide.style.display = 'none';
+    }
+
+    // Size canvas to match video display size
+    const rect = video.getBoundingClientRect();
+    canvas.width = rect.width;
+    canvas.height = rect.height;
+    canvas.style.display = 'block';
+    canvas.style.position = 'absolute';
+    canvas.style.top = '0';
+    canvas.style.left = '0';
+    canvas.style.width = rect.width + 'px';
+    canvas.style.height = rect.height + 'px';
+    canvas.style.cursor = 'crosshair';
+
+    // Initialize selection to center 60% of the video
+    const margin = 0.2;
+    state.selection.x = rect.width * margin;
+    state.selection.y = rect.height * margin;
+    state.selection.width = rect.width * (1 - 2 * margin);
+    state.selection.height = rect.height * (1 - 2 * margin);
+    state.selection.active = true;
+
+    // Draw initial selection
+    drawSelection();
+
+    // Add event listeners
+    canvas.addEventListener('mousedown', handleSelectionMouseDown);
+    canvas.addEventListener('mousemove', handleSelectionMouseMove);
+    canvas.addEventListener('mouseup', handleSelectionMouseUp);
+    canvas.addEventListener('mouseleave', handleSelectionMouseUp);
+
+    // Touch events for mobile/tablet
+    canvas.addEventListener('touchstart', handleSelectionTouchStart, { passive: false });
+    canvas.addEventListener('touchmove', handleSelectionTouchMove, { passive: false });
+    canvas.addEventListener('touchend', handleSelectionTouchEnd);
+}
+
+function hideSelectionCanvas() {
+    const canvas = elements.selectionCanvas;
+    if (canvas) {
+        canvas.style.display = 'none';
+        canvas.removeEventListener('mousedown', handleSelectionMouseDown);
+        canvas.removeEventListener('mousemove', handleSelectionMouseMove);
+        canvas.removeEventListener('mouseup', handleSelectionMouseUp);
+        canvas.removeEventListener('mouseleave', handleSelectionMouseUp);
+        canvas.removeEventListener('touchstart', handleSelectionTouchStart);
+        canvas.removeEventListener('touchmove', handleSelectionTouchMove);
+        canvas.removeEventListener('touchend', handleSelectionTouchEnd);
+    }
+
+    // Show camera guide again
+    if (elements.cameraGuide) {
+        elements.cameraGuide.style.display = '';
+    }
+
+    // Reset selection state
+    state.selection.active = false;
+    state.selection.isDragging = false;
+    state.selection.isResizing = false;
+}
+
+function drawSelection() {
+    const canvas = elements.selectionCanvas;
+    if (!canvas) return;
+
+    const ctx = canvas.getContext('2d');
+    const sel = state.selection;
+
+    // Clear canvas
+    ctx.clearRect(0, 0, canvas.width, canvas.height);
+
+    if (!sel.active) return;
+
+    // Draw semi-transparent overlay outside selection
+    ctx.fillStyle = 'rgba(0, 0, 0, 0.5)';
+    // Top
+    ctx.fillRect(0, 0, canvas.width, sel.y);
+    // Bottom
+    ctx.fillRect(0, sel.y + sel.height, canvas.width, canvas.height - sel.y - sel.height);
+    // Left
+    ctx.fillRect(0, sel.y, sel.x, sel.height);
+    // Right
+    ctx.fillRect(sel.x + sel.width, sel.y, canvas.width - sel.x - sel.width, sel.height);
+
+    // Draw selection border
+    ctx.strokeStyle = '#4CAF50';
+    ctx.lineWidth = 3;
+    ctx.strokeRect(sel.x, sel.y, sel.width, sel.height);
+
+    // Draw corner handles
+    const handleSize = 12;
+    ctx.fillStyle = '#4CAF50';
+
+    // Corner handles
+    const corners = [
+        { x: sel.x - handleSize/2, y: sel.y - handleSize/2 },                           // NW
+        { x: sel.x + sel.width - handleSize/2, y: sel.y - handleSize/2 },              // NE
+        { x: sel.x - handleSize/2, y: sel.y + sel.height - handleSize/2 },             // SW
+        { x: sel.x + sel.width - handleSize/2, y: sel.y + sel.height - handleSize/2 }  // SE
+    ];
+
+    corners.forEach(corner => {
+        ctx.fillRect(corner.x, corner.y, handleSize, handleSize);
+    });
+
+    // Draw "Chess Board" label
+    ctx.fillStyle = '#4CAF50';
+    ctx.font = 'bold 14px sans-serif';
+    ctx.textAlign = 'center';
+    ctx.fillText('Drag corners to resize', sel.x + sel.width/2, sel.y - 8);
+}
+
+function getSelectionHandle(x, y) {
+    const sel = state.selection;
+    const handleSize = 20; // Detection area slightly larger than visual handle
+
+    // Check corners
+    if (Math.abs(x - sel.x) < handleSize && Math.abs(y - sel.y) < handleSize) return 'nw';
+    if (Math.abs(x - (sel.x + sel.width)) < handleSize && Math.abs(y - sel.y) < handleSize) return 'ne';
+    if (Math.abs(x - sel.x) < handleSize && Math.abs(y - (sel.y + sel.height)) < handleSize) return 'sw';
+    if (Math.abs(x - (sel.x + sel.width)) < handleSize && Math.abs(y - (sel.y + sel.height)) < handleSize) return 'se';
+
+    // Check if inside selection (for dragging)
+    if (x > sel.x && x < sel.x + sel.width && y > sel.y && y < sel.y + sel.height) {
+        return 'move';
+    }
+
+    return null;
+}
+
+function handleSelectionMouseDown(e) {
+    const rect = elements.selectionCanvas.getBoundingClientRect();
+    const x = e.clientX - rect.left;
+    const y = e.clientY - rect.top;
+
+    const handle = getSelectionHandle(x, y);
+
+    if (handle === 'move') {
+        state.selection.isDragging = true;
+        state.selection.dragStartX = x - state.selection.x;
+        state.selection.dragStartY = y - state.selection.y;
+        elements.selectionCanvas.style.cursor = 'move';
+    } else if (handle) {
+        state.selection.isResizing = true;
+        state.selection.resizeHandle = handle;
+        state.selection.dragStartX = x;
+        state.selection.dragStartY = y;
+    }
+}
+
+function handleSelectionMouseMove(e) {
+    const rect = elements.selectionCanvas.getBoundingClientRect();
+    const x = e.clientX - rect.left;
+    const y = e.clientY - rect.top;
+    const sel = state.selection;
+    const canvas = elements.selectionCanvas;
+
+    if (sel.isDragging) {
+        // Move selection
+        sel.x = Math.max(0, Math.min(canvas.width - sel.width, x - sel.dragStartX));
+        sel.y = Math.max(0, Math.min(canvas.height - sel.height, y - sel.dragStartY));
+        drawSelection();
+    } else if (sel.isResizing) {
+        // Resize selection
+        const minSize = 50;
+
+        switch (sel.resizeHandle) {
+            case 'nw':
+                const newWidthNW = sel.x + sel.width - x;
+                const newHeightNW = sel.y + sel.height - y;
+                if (newWidthNW > minSize) {
+                    sel.width = newWidthNW;
+                    sel.x = x;
+                }
+                if (newHeightNW > minSize) {
+                    sel.height = newHeightNW;
+                    sel.y = y;
+                }
+                break;
+            case 'ne':
+                sel.width = Math.max(minSize, x - sel.x);
+                const newHeightNE = sel.y + sel.height - y;
+                if (newHeightNE > minSize) {
+                    sel.height = newHeightNE;
+                    sel.y = y;
+                }
+                break;
+            case 'sw':
+                const newWidthSW = sel.x + sel.width - x;
+                if (newWidthSW > minSize) {
+                    sel.width = newWidthSW;
+                    sel.x = x;
+                }
+                sel.height = Math.max(minSize, y - sel.y);
+                break;
+            case 'se':
+                sel.width = Math.max(minSize, x - sel.x);
+                sel.height = Math.max(minSize, y - sel.y);
+                break;
+        }
+        drawSelection();
+    } else {
+        // Update cursor based on hover
+        const handle = getSelectionHandle(x, y);
+        if (handle === 'move') {
+            canvas.style.cursor = 'move';
+        } else if (handle === 'nw' || handle === 'se') {
+            canvas.style.cursor = 'nwse-resize';
+        } else if (handle === 'ne' || handle === 'sw') {
+            canvas.style.cursor = 'nesw-resize';
+        } else {
+            canvas.style.cursor = 'crosshair';
+        }
+    }
+}
+
+function handleSelectionMouseUp() {
+    state.selection.isDragging = false;
+    state.selection.isResizing = false;
+    state.selection.resizeHandle = null;
+}
+
+// Touch event handlers
+function handleSelectionTouchStart(e) {
+    e.preventDefault();
+    const touch = e.touches[0];
+    handleSelectionMouseDown({ clientX: touch.clientX, clientY: touch.clientY });
+}
+
+function handleSelectionTouchMove(e) {
+    e.preventDefault();
+    const touch = e.touches[0];
+    handleSelectionMouseMove({ clientX: touch.clientX, clientY: touch.clientY });
+}
+
+function handleSelectionTouchEnd() {
+    handleSelectionMouseUp();
 }
 
 // ============================================

@@ -22,6 +22,9 @@
                     <button class="btn btn-primary" id="cameraBtn">
                         📸 Camera
                     </button>
+                    <button class="btn btn-primary" id="screenCaptureBtn" style="display: none;" title="Capture chess position from your screen">
+                        🖥️ Screen
+                    </button>
                     <span class="or-divider">or</span>
                     <label class="btn btn-secondary file-label">
                         📁 File
@@ -182,10 +185,12 @@
                 </div>
                 <div class="camera-container">
                     <video id="cameraVideo" autoplay playsinline muted></video>
-                    <div class="camera-guide">
+                    <div class="camera-guide" id="cameraGuide">
                         <div class="guide-square"></div>
                         <div class="guide-text">Align board here<br><small>Hold steady, good lighting for best results</small></div>
                     </div>
+                    <!-- Selection overlay for screen capture mode -->
+                    <canvas id="selectionCanvas" style="display: none;"></canvas>
                 </div>
                 <div class="camera-status" id="cameraStatus">Initializing camera...</div>
                 <div class="camera-controls">
@@ -208,6 +213,10 @@
             <details>
                 <summary>I get question marks on the resulting board</summary>
                 <p>Question marks indicate uncertain predictions. Check against your image and edit the board if needed.</p>
+            </details>
+            <details>
+                <summary>Screen capture gives poor results</summary>
+                <p>On PC you can capture the board directly from your screen. If you get several warnings or question marks, try changing the board theme in your chess app to one with better contrast. For example, in Chess.com you can go to Settings and switch to a different board theme - several presets work better for piece recognition.</p>
             </details>
             <details>
                 <summary>The game does not exist on Chess.com</summary>
