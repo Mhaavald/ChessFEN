@@ -55,7 +55,7 @@ document.addEventListener('DOMContentLoaded', () => {
     cacheElements();
     bindEvents();
     loadModels();
-    checkAuthStatus();
+    // Auth disabled - no checkAuthStatus() call needed
     initScreenCaptureButton();
 });
 
@@ -1809,28 +1809,8 @@ async function checkChessCom(fen) {
     return await response.json();
 }
 
-// Check if user is admin and show admin link
-async function checkAdminAccess() {
-    try {
-        const response = await fetch(`${CONFIG.API_BASE}/admin/statistics`, {
-            credentials: 'include'
-        });
-
-        if (response.ok) {
-            // User has admin access, show the admin link
-            const adminLink = document.getElementById('adminLink');
-            if (adminLink) {
-                adminLink.style.display = 'block';
-            }
-        }
-    } catch (error) {
-        // Silently fail - user is not admin
-        console.log('Not an admin user');
-    }
-}
-
-// Check admin access on page load
-checkAdminAccess();
+// Check if user is admin and show admin link - DISABLED (auth removed)
+// async function checkAdminAccess() { ... }
 
 // ============================================
 // Version Display
