@@ -59,39 +59,11 @@ document.addEventListener('DOMContentLoaded', () => {
     initScreenCaptureButton();
 });
 
-// Check if user is authenticated (Azure Easy Auth)
+// Check if user is authenticated (Azure Easy Auth) - DISABLED
 async function checkAuthStatus() {
-    try {
-        // Azure Container Apps Easy Auth provides /.auth/me endpoint
-        const controller = new AbortController();
-        const timeout = setTimeout(() => controller.abort(), 5000);
-
-        const response = await fetch('/.auth/me', {
-            signal: controller.signal,
-            credentials: 'include'
-        });
-        clearTimeout(timeout);
-
-        if (response.ok) {
-            const authData = await response.json();
-            if (authData && authData.length > 0 && authData[0].user_id) {
-                console.log('Authenticated as:', authData[0].user_id);
-                return true;
-            }
-        }
-
-        // Not authenticated or session expired
-        console.log('Not authenticated or session expired');
-        return false;
-    } catch (error) {
-        // On localhost, /.auth/me won't exist - that's fine
-        if (window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1') {
-            console.log('Local dev mode - skipping auth check');
-            return true;
-        }
-        console.warn('Auth check failed:', error.message);
-        return false;
-    }
+    // Auth disabled - always return true
+    console.log('Auth disabled - skipping auth check');
+    return true;
 }
 
 function cacheElements() {
