@@ -13,7 +13,11 @@ RUN apt-get update && apt-get install -y \
     curl \
     libgl1 \
     libglib2.0-0 \
+    apache2-utils \
     && rm -rf /var/lib/apt/lists/*
+
+# Create admin password file (username: admin, password: Chess2026!)
+RUN htpasswd -bc /etc/nginx/.htpasswd admin Chess2026!
 
 # Create symlink for python
 RUN ln -sf /usr/bin/python3.11 /usr/bin/python
